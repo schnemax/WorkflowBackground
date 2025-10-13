@@ -22,70 +22,6 @@ final class Service
 
 
 
-    private function xxnormalizeType(?string $t): ?string
-    {
-        if (!$t) return null;
-        $u = mb_strtoupper(trim((string)$t), 'UTF-8');
-        return match (true) {
-            $u === 'RECHNUNG' => 'Rechnung',
-            $u === 'EINZUG' || $u === 'SEPA-EINZUG' || $u === 'LASTSCHRIFT' => 'Einzug',
-            $u === 'GUTSCHRIFT' || $u === 'CREDIT NOTE' || $u === 'CREDIT-NOTE' => 'Gutschrift',
-            $u === 'ERSATZBELEG' || $u === 'BARBELEG' || $u === 'KASSENBELEG' => 'Ersatzbeleg',
-            default => $t,
-        };
-    }
-
-
-    public function xxwfConfig(): array
-    {
-        return [
-            'Rechnung'  => ['required' => ['invoice_number', 'invoice_amount', 'invoice_date', 'issuer_iban', 'issuer_bic'], 'ok' => ['WF:PRUEFEN'], 'miss' => ['WF:DATEN_UNVOLLSTAENDIG']],
-            'Ersatzbeleg' => ['required' => ['invoice_date', 'invoice_amount'], 'ok' => ['WF:ARCHIVIERT_BEREIT'], 'miss' => ['WF:DATEN_UNVOLLSTAENDIG']],
-        ];
-    }
-
-    /** @return array{missing:string[], map:array} */
-    public function xxvalidateByType(string $type, array $ex, ?string $invDate): array
-    {
-        $req = ($this->xxwfConfig()[$type]['required'] ?? []);
-        Log::j('INFO', 'validateByType', ['x' => $ex]);
-        $map = [
-            'invoice_number' => $ex['invoice_number'] ?? null,
-            'invoice_amount' => $ex['invoice_amount'] ?? null,
-            'invoice_date'   => $invDate,
-            'issuer_iban'    => $ex['issuer_iban'] ?? null,
-            'issuer_bic'     => $ex['issuer_bic'] ?? null,
-        ];
-        $missing = [];
-        foreach ($req as $k) if (empty($map[$k]) && $map[$k] !== 0 && $map[$k] !== '0') $missing[] = $k;
-        return ['missing' => $missing, 'map' => $map];
-    }
-
-    public function xxsyncTags(int $docId, string $type, array $missing): void
-    {
-        $cfg = $this->xxwfConfig()[$type] ?? null;
-        if (!$cfg) return;
-        $names = $missing ? ($cfg['miss'] ?? []) : ($cfg['ok'] ?? []);
-        $targetIds = [];
-        foreach ($names as $n) {
-            $id = $this->pl->ensureTag($n);
-            if ($id) $targetIds[] = (int)$id;
-        }
-
-        // aktuelle WF:-Tags ermitteln
-        $doc = $this->pl->getDocument($docId);
-        $existing = [];
-        foreach ((array)($doc['tags'] ?? []) as $tid) {
-            $t = $this->pl->getTag((int)$tid);
-            if (!empty($t['name']) && str_starts_with($t['name'], 'WF:')) $existing[] = (int)$tid;
-        }
-
-        $toRemove = array_values(array_diff($existing, $targetIds));
-        $toAdd    = array_values(array_diff($targetIds, $existing));
-        if ($toRemove) $this->pl->bulkEdit([$docId], 'remove_tags', ['remove_tags' => $toRemove]);
-        if ($toAdd)    $this->pl->bulkEdit([$docId], 'add_tags', ['add_tags' => $toAdd]);
-    }
-
     public function buildTitle(string $type, ?string $issuer, array $ex, ?string $invDate): string
     {
         //$issuer = $doc['correspondent__name'] ?? $doc['correspondent_name'] ?? ($doc['correspondent']['name'] ?? null);
@@ -241,24 +177,14 @@ final class Service
         return $valuesById;
     }
 
-    // Hilfsfunktion: Tag-IDs säubern
-    private function xxsanitizeTagIds(array $ids): array
-    {
-        $ids = array_map('intval', $ids);
-        $ids = array_filter($ids, fn($i) => $i > 0);
-        $ids = array_values(array_unique($ids));
-        return $ids;
-    }
-
-
+    
 
     public function allowedTransitions(): array
     {
         // erlaubte Übergänge: nur Keys
         $ALLOWED = [
             'INIT' => ['INIT', 'PRUEFEN', 'CLOSE', 'ERROR'],
-            'PRUEFEN' => ['BUSY', 'UNVOLL', 'APP_REQ', 'ERROR'],
-            'BUSY'    => ['UNVOLL', 'APP_REQ', 'ERROR'],
+            'PRUEFEN' => ['UNVOLL', 'APP_REQ', 'ERROR'],
             'UNVOLL'  => ['APP_REQ', 'ERROR'],
             'APP_REQ' => ['APP_OK', 'APP_REJ', 'UNVOLL', 'ERROR'],
             'APP_OK'  => ['SEPA', 'CLOSE', 'ERROR'],
@@ -341,7 +267,7 @@ final class Service
 
     public function enforceAndResolveState(
         int $docId,
-        array $T,                 // Key => Tag-ID (PRUEFEN,BUSY,...)
+        array $T,                 // Key => Tag-ID (PRUEFEN,...)
         array $ALLOWED,            // Key => [erlaubte Next-Keys]
         array $tagIds,
         string $title,
@@ -378,7 +304,7 @@ final class Service
         // 7) Entscheidung: welchen State nehmen?
         //    - Wenn erlaubte vorhanden → nimm höchste Priorität
         //    - Sonst prev
-        $priority = ['CLOSE', 'ERROR', 'SEPA', 'APP_OK', 'APP_REQ', 'UNVOLL', 'BUSY', 'PRUEFEN2', 'PRUEFEN', 'INIT', 'APP_REJ'];
+        $priority = ['CLOSE', 'ERROR', 'SEPA', 'APP_OK', 'APP_REQ', 'UNVOLL', 'PRUEFEN2', 'PRUEFEN', 'INIT', 'APP_REJ'];
         $chosen = $prev;
         if ($keepAllowed) {
             usort(
@@ -494,7 +420,6 @@ final class Service
         // Alle State-Tag-IDs (die exklusiv sein sollen)
         $stateIds = array_values(array_filter([
             $T['PRUEFEN'] ?? null,
-            $T['BUSY'] ?? null,
             $T['UNVOLL'] ?? null,
             $T['APP_REQ'] ?? null,
             $T['APP_OK'] ?? null,
@@ -530,15 +455,7 @@ final class Service
         ]);
     }
 
-    /**: Default-Ziel für gewählten State */
-    public function xxdefaultNext(string $state): ?string
-    {
-        return [
-            'APP_OK' => 'SEPA',   // nach Freigabe: SEPA erstellen
-            'SEPA'   => 'CLOSE',  // nach SEPA-Erstellung: schließen
-            // weitere Defaults nach Bedarf…
-        ][$state] ?? null;
-    }
+    
 
     /** SEPA erstellen (Credit Transfer) – Minimalbeispiel */
     public function actionCreateSepa(int $docId, array $ex, array $opts, $repo): bool
@@ -566,69 +483,10 @@ final class Service
         return true;
     }
 
-    /** Nach SEPA-Erstellung: nichts weiter als Info (Beispiel) */
-    private function xxactionCloseAfterSepa(int $docId, array $ex, array $opts): bool
-    {
-        if ($this->notifier && empty($opts['dry'])) {
-            $to = getenv('WF_DEFAULT_ACTOR') ?: 'it_admin@albatros-hospiz.de';
-            $this->notifier->send(
-                $to,
-                "Dokument geschlossen: #$docId",
-                '<p>Nach SEPA-Erstellung geschlossen.</p><p><a href="' . $this->pl->documentUrl($docId) . '">Dokument öffnen</a></p>'
-            );
-        }
-        return true;
-    }
-    private function xxisDirectDebit(int $docId, ?array $ex): bool
-    {
-        if (isset($ex['dd'])) return (bool)$ex['dd'];
-        if (method_exists($this->repo, 'getExtract')) {
-            $row = $this->repo->getExtract($docId);
-            if ($row && $row['direct_debit'] !== null) return (bool)$row['direct_debit'];
-        }
-        // Fallback: aus CF „Zahlart“ (select)
-        $doc = $this->pl->getDocument($docId, ['expand' => 'custom_fields']);
-        foreach (($doc['custom_fields'] ?? []) as $inst) {
-            $fid = (int)($inst['field'] ?? 0);
-            $def = $this->pl->getCustomFieldDef($fid) ?? [];
-            if (($def['data_type'] ?? '') !== 'select') continue;
-            $opts = $def['extra_data']['select_options'] ?? $def['choices'] ?? [];
-            foreach ($opts as $opt) {
-                if ((string)($inst['value'] ?? '') !== (string)($opt['id'] ?? '')) continue;
-                $label = mb_strtolower((string)($opt['label'] ?? ''), 'UTF-8');
-                return in_array($label, ['einzug', 'lastschrift', 'sepa-einzug'], true);
-            }
-        }
-        return false;
-    }
+    
 
-    private function xxhasAmount(int $docId, ?array $ex): bool
-    {
-        if (!empty($ex['amt'])) return true;
-        if (method_exists($this->repo, 'getExtract')) {
-            $row = $this->repo->getExtract($docId);
-            if ($row && (float)($row['invoice_amount'] ?? 0) > 0) return true;
-        }
-        // optional: aus CF „Betrag“
-        $doc = $this->pl->getDocument($docId, ['expand' => 'custom_fields']);
-        foreach (($doc['custom_fields'] ?? []) as $inst) {
-            $fid = (int)($inst['field'] ?? 0);
-            $def = $this->pl->getCustomFieldDef($fid) ?? [];
-            if (mb_strtolower((string)($def['name'] ?? ''), 'UTF-8') === 'betrag') {
-                $v = str_replace(',', '.', (string)($inst['value'] ?? ''));
-                return (float)$v > 0;
-            }
-        }
-        return false;
-    }
-    // in App\Workflow\Service (oder eigener Helper)
-    private function xx($v): ?float
-    {
-        if ($v === null || $v === '') return null;
-        $s = str_replace(['.', ' '], ['', ''], (string)$v);
-        $s = str_replace(',', '.', $s);
-        return is_numeric($s) ? round((float)$s, 2) : null;
-    }
+    
+    
     private function normAmountCF($v): ?float
     {
         if ($v === null || $v === '') return null;
@@ -637,12 +495,7 @@ final class Service
         return is_numeric($s) ? round((float)$s, 2) : null;
     }
 
-    private function normIban_no_longer_used(?string $s): ?string
-    {
-        if (!$s) return null;
-        $s = strtoupper(preg_replace('~\s+~', '', $s));
-        return preg_match('~^[A-Z0-9]{15,34}$~', $s) ? $s : null;
-    }
+    
     private function isValidBic(?string $s): bool
     {
         if (!$s) return false;
@@ -752,15 +605,7 @@ final class Service
         return $missing;
     }
 
-    // Irgendwo in deinem Workflow/Service
-
-    public function xxsafeTitle(string $s, int $max = 200): string
-    {
-        $s = str_replace(["\r", "\n"], ' ', $s);
-        $s = preg_replace('~\s+~', ' ', $s);
-        $s = trim($s);
-        return mb_strlen($s, 'UTF-8') > $max ? mb_substr($s, 0, $max, 'UTF-8') : $s;
-    }
+    
 
     /**
      * Baut die *finale* Tagliste:

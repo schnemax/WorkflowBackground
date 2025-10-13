@@ -17,6 +17,7 @@ use App\Notify\MailNotifier;
 use App\Notify\LogNotifier;
 use App\Sepa\SimpleSepa;
 use App\Http;
+use App\Workflow\StateTags;
 
 $ntf = class_exists(\PHPMailer\PHPMailer\PHPMailer::class)
     ? MailNotifier::fromEnv()
@@ -44,24 +45,8 @@ $sepa = new SimpleSepa($repo);
 $wf   = new WF($pl, $repo, $ntf, $sepa);
 //$ntf  = new Notifier();
 
-// Status-/Steuer-Tags einmal auflösen
-
-$S = [
-    'INIT' => 'WF:Init',
-    'PRUEFEN' => 'WF:Pruefen',
-    'PRUEFEN2' => 'WF:Wiedervorlage',
-    'BUSY'    => 'WF:Busy',
-    'UNVOLL'  => 'WF:Daten_unvollständig',
-    'APP_REQ' => 'WF:Rechnungsfreigabe_erforderlich',
-    'APP_OK'  => 'WF:Rechnungsfreigabe_erfolgt',
-    'APP_REJ' => 'WF:Freigabe_verweigert',
-    'SEPA'    => 'WF:SEPA_erzeugt',
-    'CLOSE'   => 'WF:Abgeschlossen',
-    'ERROR'   => 'WF:Error',
-    'TRACE'   => "WF:Trace",
-    // optional: 'TRACE' => 'WF:Trace',
-];
-
+// Array für die Umschlüsselung Key => Tag-Name
+$S = StateTags::MAP;
 
 // IDs pro Key (robust, weil nicht lokalisiert)
 $T = [];
@@ -139,15 +124,7 @@ function process_one(
     // Content laden (mit Backoff)
     //$notiz = '';
     [$docFull, $content] = backoffFetchContent($pl, $docId, 90.0);
-    /*if ($content === '') {
-        Log::j('DEBUG', 'no-content', ['doc' => $docId]);
-        if (!$opts['dry']) {
-            $wf->replaceTags($docId, [$T['WF:Busy']], [$T['ERROR']]);
-            $repo->wfSetState($docId, 'ERROR', 'No-Content', 'N/A', ['last_error' => 'no content']);
-        }
-        return;
-    }*/
-
+   
     // die aktuellen Tags (e.g. WF:PRUEFEN, etc.) werden im array currentTagIds verfügbar gemacht
     $currentTagIds   = array_map('intval', $doc['tags'] ?? []);
     Log::j('DEBUG', 'tagIDs', ['ids are' => $currentTagIds]);
@@ -169,7 +146,6 @@ function process_one(
         $T['INIT'] ?? null,
         $T['PRUEFEN'] ?? null,
         $T['PRUEFEN2'] ?? null,
-        $T['BUSY'] ?? null,
         $T['UNVOLL'] ?? null,
         $T['APP_REQ'] ?? null,
         $T['APP_OK'] ?? null,
@@ -548,12 +524,7 @@ function process_one(
             break;
 
         // =============================================================================================        // =============================================================================================
-        // BUSY ist ein interner Status -> wird dürfen hier nichts machen -> dieser Status
-        // muss intern gelöscht werden
-
-        case "BUSY":
-            break;
-
+        
         // UNVOLL ist ein Status, wo der Benutzer gefragt ist. Er muss nun in den Benutzerfeldern
         // von Paperless die fehlenden Daten ergänzen. Danach kann er den Status wieder auf PRUEFEN setzen
         // hier fehlt aktuell allerdings noch die Logik, dass bei Status = PRUEFEN geprüft wird,
@@ -760,7 +731,7 @@ function stateFromTags(array $doc, array $T): ?string
     Log::j('DEBUG', 'stateFromTags', ['doc' => $doc]);
     $tagIds = array_map('intval', $doc['tags'] ?? []);
     // Priorität: jeder Doc soll genau einen Status-Tag tragen; nimm den ersten gefundenen
-    foreach (['WF:Close', 'WF:Error', 'WF:Freigabe_erfolgt', 'WF:SEPA_erzeugt', 'WF:Freigabe_erforderlich', 'WF:Freigabe_verweigert', 'WF:Daten_unvollständig', 'BUSY', 'WF:Pruefen'] as $k) {
+    foreach (['WF:Close', 'WF:Error', 'WF:Freigabe_erfolgt', 'WF:SEPA_erzeugt', 'WF:Freigabe_erforderlich', 'WF:Freigabe_verweigert', 'WF:Daten_unvollständig', 'WF:Pruefen'] as $k) {
         if (in_array($T[$k] ?? -1, $tagIds, true)) return $k;
     }
     return null;

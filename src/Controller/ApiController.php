@@ -10,6 +10,7 @@ use App\Workflow\Service as WF;
 use App\Notify\MailNotifier;
 use App\Notify\LogNotifier;
 use App\Sepa\SimpleSepa;
+use App\Workflow\StateTags;
 
 final class ApiController
 {
@@ -35,18 +36,7 @@ final class ApiController
         ];
     }
 
-    /** PATCH /api/v1/workflow/{docId}/doctype  body: {"doctype":"invoice"} */
-    public function no_longer_used_setDoctype(int $docId, array $body): array
-    {
-        $slug = strtolower((string)($body['doctype'] ?? ''));
-        if ($slug === '') throw new \App\Http\HttpException(400, 'Missing doctype');
 
-        $id = $this->doctypes->resolveIdBySlug($slug);
-        if (!$id) throw new \App\Http\HttpException(400, "Unknown doctype: $slug");
-
-        $this->paperless->patchDocumentType($docId, $id);
-        return ['ok' => true, 'doctype' => $slug];
-    }
     // src/Controller/ApiV1Controller.php
     public function setDoctype(int $docId, array $body): array
     {
@@ -78,6 +68,9 @@ final class ApiController
         // 1) Status → Paperless-Tag-ID
         \App\Log::j('INFO', 'status with comit', ['map' => $status]);
         // ======================= translate - very static -> must improve later
+        // Key → Name
+        $plstatus = StateTags::keyToName($status); // "WF:Rechnungsfreigabe_erforderlich"
+        /*
         switch ($status) {
             case 'INIT':
                 $plstatus = 'WF:Init';
@@ -87,9 +80,6 @@ final class ApiController
                 break;
             case 'PRUEFEN2':
                 $plstatus = 'WF:Wiedervorlage';
-                break;
-            case 'BUSY':
-                $plstatus = 'WF:Busy';
                 break;
             case 'UNVOLL':
                 $plstatus = 'WF:Daten_unvollständig';
@@ -110,8 +100,10 @@ final class ApiController
                 break;
             default:
                 return ['ok' => false, 'error' => "unknown status $status"];
-        }
-
+        }*/
+        if ($plstatus === null) {
+            return ['ok' => false, 'error' => "unknown status $status"];
+        }   
         // ====================================================================
 
         $tagIdint = $this->paperless->findTagIdByName($plstatus); // z. B. INIT→123, APP_REQ→124 ...

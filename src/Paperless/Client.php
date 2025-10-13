@@ -7,6 +7,7 @@ use App\Http\HttpException;
 use App\Paperless\Client as PaperlessClient;
 use App\Log;
 use App\Http\Json;
+use App\Workflow\StateTags;
 
 
 final class Client
@@ -207,10 +208,14 @@ final class Client
             $finalTagIds,      // null, wenn Tags unverändert bleiben sollen
             $cfPatches,        // null, wenn keine CF-Updates anstehen
             $code,
-            $body, 
+            $body,
             $doctype = $typeId
         );
-        if ($ok) {return ['status' => '200'];} else {return ['status' => '500'];};
+        if ($ok) {
+            return ['status' => '200'];
+        } else {
+            return ['status' => '500'];
+        };
     }
 
     // vorhandene Methoden wie getDocument(..), patchDocument(..) bleiben unverändert
@@ -246,12 +251,14 @@ final class Client
         // Nutzt deine Basis-URL aus Config (extern erreichbar!)
         //return rtrim($this->baseUrl, '/') . "/documents/{$id}/"; --> früher direkt nach Paperless
 
-        return rtrim($this->workflowUrl,'/') . "/{$id}"; // --> jetzt zur Workflow Application
+        return rtrim($this->workflowUrl, '/') . "/{$id}"; // --> jetzt zur Workflow Application
     }
+
     public function documentApiUrl(int $id): string
     {
         return rtrim($this->baseUrl, '/') . "/api/documents/{$id}/";
     }
+
     // Tags auflisten (paginiert)
     public function listTags(array $query = []): ?array
     {
@@ -537,7 +544,7 @@ final class Client
         // 1) Namen aus expand=tags (falls vorhanden)
         if (!empty($doc['tags_data'])) {
             foreach ($doc['tags_data'] as $t) {
-                $key = self::nametokey((string)($t['name'] ?? ''), $S, $GLOBALS['ALIASES'] ?? []);
+                $key = StateTags::nametokey((string)($t['name'] ?? ''), $S, $GLOBALS['ALIASES'] ?? []);
                 if ($key) return $key;
             }
         }
@@ -545,7 +552,7 @@ final class Client
         // 2) IDs direkt matchen (robust, nicht lokalisiert)
         $ids = array_map('intval', $doc['tags'] ?? []);
         if ($ids) {
-            foreach (['CLOSE', 'ERROR', 'APP_OK', 'SEPA', 'APP_REQ', 'UNVOLL', 'BUSY', 'PRUEFEN'] as $key) {
+            foreach (['CLOSE', 'ERROR', 'APP_OK', 'SEPA', 'APP_REQ', 'UNVOLL',  'PRUEFEN'] as $key) {
                 if (in_array((int)($T[$key] ?? -1), $ids, true)) return $key;
             }
         }
@@ -554,7 +561,7 @@ final class Client
         $doc2 = $pl->getDocument($docId, ['expand' => 'tags']);
 
         foreach (($doc2['tags_data'] ?? []) as $t) {
-            $key = self::nametokey((string)($t['name'] ?? ''), $S, $GLOBALS['ALIASES'] ?? []);
+            $key = StateTags::nametokey((string)($t['name'] ?? '')); 
             if ($key) return $key;
         }
         return null;
@@ -595,7 +602,7 @@ final class Client
         \App\Log::j('DEBUG', 'stateFromTagsSmart', ['doc' => $docId, 'names' => $names, 'ids' => $ids]);
 
         // 3) Priorität (finale zuerst)
-        $prio = ['CLOSE', 'ERROR', 'APP_OK', 'SEPA', 'APP_REQ', 'UNVOLL', 'BUSY', 'PRUEFEN'];
+        $prio = ['CLOSE', 'ERROR', 'APP_OK', 'SEPA', 'APP_REQ', 'UNVOLL', 'PRUEFEN'];
 
         // 3a) per Name → Key
         if ($names) {
@@ -639,7 +646,7 @@ final class Client
     }
 
     /** Mappt einen Tag-Anzeigenamen auf deinen State-Key (z. B. "APP_OK"), unter Nutzung von $S (offizielle Namen) + $ALIASES (Synonyme). */
-    public function nameToKey(string $tagName, array $S, array $ALIASES = []): ?string
+    public function no_longer_used_nameToKey(string $tagName, array $S, array $ALIASES = []): ?string
     {
         $n = self::normTag($tagName);
 
