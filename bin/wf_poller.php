@@ -124,7 +124,7 @@ function process_one(
     // Content laden (mit Backoff)
     //$notiz = '';
     [$docFull, $content] = backoffFetchContent($pl, $docId, 90.0);
-   
+
     // die aktuellen Tags (e.g. WF:PRUEFEN, etc.) werden im array currentTagIds verfügbar gemacht
     $currentTagIds   = array_map('intval', $doc['tags'] ?? []);
     Log::j('DEBUG', 'tagIDs', ['ids are' => $currentTagIds]);
@@ -154,6 +154,8 @@ function process_one(
         $T['CLOSE'] ?? null,
         $T['ERROR'] ?? null,
     ]);
+    //Log::j('DEBUG', 'stateIds', ['ids are' => $stateIds, 'T is' => $T]);
+
 
     // Konfiguration: Mapping deiner CF-Namen
     // die CF_MAP muss Dokumentenspezifisch definiert werden. Die aktuelle Map ist korrekt
@@ -524,7 +526,7 @@ function process_one(
             break;
 
         // =============================================================================================        // =============================================================================================
-        
+
         // UNVOLL ist ein Status, wo der Benutzer gefragt ist. Er muss nun in den Benutzerfeldern
         // von Paperless die fehlenden Daten ergänzen. Danach kann er den Status wieder auf PRUEFEN setzen
         // hier fehlt aktuell allerdings noch die Logik, dass bei Status = PRUEFEN geprüft wird,
