@@ -1,0 +1,40 @@
+# --- Composer ---
+/vendor/              # NICHT committen
+/composer.phar
+/composer-setup.php   # Installer-Skript nicht versionieren
+
+# Lockfile BEHALTEN (App) -> reproduzierbare Deployments
+# composer.lock NICHT ignorieren
+
+# --- App/Build/Runtime ---
+/var/                 # Cache/Logs/Temp
+/var/*                # alles raus...
+!/var/.gitkeep        # ...aber Platzhalter drin lassen
+/public/uploads/      # falls es Uploads gibt
+/public/build/        # falls ein Build-Output existiert (Frontend-Tools)
+*.log
+*.cache
+*.tmp
+*.pid
+
+# --- Konfiguration / Secrets ---
+.env
+.env.*
+workflow.env
+docker-compose.override.yml
+/config/*-local.php
+/config/*.local.php
+/config/*.secrets.php
+
+# --- Docker ---
+docker-*.log
+
+# --- IDE/System ---
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+
+# --- Sonstiges (ergänzen falls nötig) ---
+# /bin/*-generated
+# /prompts/generated/

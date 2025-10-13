@@ -1,0 +1,14 @@
+services:
+  php:
+    build:
+      context: ./app
+      dockerfile: dockerfile
+    working_dir: /var/nas002/paperless-ngx/app
+    container_name: workflow-php
+    command: php -S 0.0.0.0:8080 -t public
+    ports:
+      - "8080:8080"        # oder dein alternativer Host-Port
+    volumes:
+      - ./app:/app
+    env_file:
+      - /var/nas002/paperless-ngx/app/workflow.env

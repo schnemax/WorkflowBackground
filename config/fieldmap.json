@@ -1,0 +1,11 @@
+{
+  "issuer_name":     { "field": "Rechnungssteller",  "type": "text",   "required_in": ["APP_REQ","SEPA","CLOSE"] },
+  "invoice_number":  { "field": "Rechnungsnummer",   "type": "text",   "required_in": ["APP_REQ","SEPA","CLOSE"] },
+  "invoice_date":    { "field": "Rechnungsdatum",    "type": "date",   "required_in": ["APP_REQ","SEPA","CLOSE"] },
+  "invoice_amount":  { "field": "BetragBrutto",      "type": "decimal","required_in": ["APP_REQ","SEPA","CLOSE"] },
+  "issuer_iban":     { "field": "GlaeubigerIBAN",    "type": "iban",   "required_in": ["APP_REQ","SEPA"] },
+  "issuer_bic":      { "field": "GlaeubigerBIC",     "type": "bic",    "required_in": ["APP_REQ","SEPA"] },
+  "payment_purpose": { "field": "Verwendungszweck",  "type": "text" },
+  "direct_debit":    { "field": "Zahlart",           "type": "select", "options": { "true":"Einzug", "false":"Überweisung" }},
+  "konto":           { "field": "Ueberweisungskonto", "type": "text", "required_in": ["APP_REQ","SEPA"] }
+}
