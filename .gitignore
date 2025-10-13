@@ -38,3 +38,4 @@ Thumbs.db
 # --- Sonstiges (ergänzen falls nötig) ---
 # /bin/*-generated
 # /prompts/generated/
+var/wf_last_run.txt
