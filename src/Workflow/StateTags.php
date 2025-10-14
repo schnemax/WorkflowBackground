@@ -29,7 +29,8 @@ final class StateTags
         'SEPA'    => 'WF:SEPA_erzeugt',
         'CLOSE'   => 'WF:Abgeschlossen',
         'ERROR'   => 'WF:Error',
-        'TRACE'   => 'WF:Trace',
+        'IGNORE'  => 'WF:Ignorieren',
+        'REACT'   => 'WF:Reaktivieren',
     ];
 
     /** Direkt: State-Key → Anzeigename, oder null wenn unbekannt. */

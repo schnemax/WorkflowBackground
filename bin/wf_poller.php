@@ -153,8 +153,9 @@ function process_one(
         $T['SEPA'] ?? null,
         $T['CLOSE'] ?? null,
         $T['ERROR'] ?? null,
+        $T['IGNORE'] ?? null,
+        $T['REACT'] ?? null,
     ]);
-    //Log::j('DEBUG', 'stateIds', ['ids are' => $stateIds, 'T is' => $T]);
 
 
     // Konfiguration: Mapping deiner CF-Namen
@@ -245,7 +246,7 @@ function process_one(
                 );
                 // dieser Fall muss hier nun abgeschlossen werden -> es wird kein dms_extract bzw.
                 // wf_job geschrieben werden
-                $nextState = 'CLOSE';
+                $nextState = 'IGNORE';
                 $targetKey = $nextState; // z.B. 'APP_REQ' oder 'UNVOLL' …
                 $targetId  = (int)($T[$targetKey] ?? 0);
 
@@ -305,19 +306,55 @@ function process_one(
             // aber nur zu einem CLOSE ohne weitere Prüfung (zumindest für den aktuellen Stand ist das so gewünscht)
 
             if ($typeName !== 'Rechnung' && $currentState === 'PRUEFEN') {
-                $nextState = 'CLOSE';
-                // Status-Ziel & IDs
-                $targetKey = $nextState;
-                $targetId  = (int)($T[$targetKey] ?? 0);
-                // 2) Finale Tagliste berechnen (exklusiver State)
-                $finalTagIds = $wf->buildFinalTags($currentTagIds, $stateIds, $targetId);
+                // für Barbelege müssen wir jetzt noch versuchen, einen Rückbezug des Dokumentes zu dem Barbeleg
+                // herzustellen. Der Extrakt beinhaltet - wenn alles korrekt läuft - die Referenz zum Barbeleg in
+                // der Form bbbb:iiii wobei bbbb=Kassenbuchid und iiii=Kassenbucheintrag ist
+                // preg_match('/^(\d+):(\d+)$/', $ex['invoice_number'] ?? '', $m)
 
+                $nextState = 'CLOSE';
                 $code = 0;
                 $body = '';
                 $newTitle = null;
                 $cfPatches = null;
 
-                // es wird nur der Status gepatched
+                // notwendige Schritte
+                // 1 - prüfen, ob $ex('invoice_number') eine gültige Referenz enthält
+                $exKI = $ext->extract($content, $typeName);
+                $exCF = $wf->collectExFromCF($docId, $CF_MAP, $pl, $repo);  // liefert Keys wie oben
+                $ex = $wf->mergeEx($exKI, $exCF);    // <-- ab hier NUR NOCH $ex verwenden
+                $patches = $wf->syncCustomFieldsAndValidate($docId, $ex, $nextState, $pl);
+                $cfPatches = [];
+                foreach ($patches /* dein Dict */ as $fid => $val) {
+                    // Typ-Sauberkeit:
+                    if ((int)$fid === 15) { // falls 15 = Betrag (decimal)
+                        $val = number_format((float)$val, 2, '.', ''); // "7676.00"
+                    }
+                    $cfPatches[] = ['field' => (int)$fid, 'value' => $val];
+                }
+                if ($typeName == 'Barbeleg') {
+                    $newTitle = 'Barbeleg ' . ($ex['invoice_number'] ?? 'Barbeleg');
+                    preg_match('/^(\d+):(\d+)$/', $ex['invoice_number'] ?? '', $m);
+                    if (count($m) === 3) {
+                        $dkbid = (int)$m[1];
+                        $lfdnr = (int)$m[2];
+                        $ref = $repo->find_dkbd_entry($dkbid, $lfdnr);
+                        if ($ref !== null) {
+                            $repo->link_dok_to_dkbd($docId, $dkbid, $lfdnr);
+                            Log::j('INFO', 'Barbeleg linked', ['doc' => $docId, 'dkbid' => $dkbid, 'lfdnr' => $lfdnr, 'dmsdokid' => $ref]);
+                        } else {
+                            Log::j('WARN', 'Barbeleg link failed - reference not found', ['doc' => $docId, 'dkbid' => $dkbid, 'lfdnr' => $lfdnr]);
+                        }
+                    } else {
+                        Log::j('WARN', 'Barbeleg link failed - invalid reference', ['doc' => $docId, 'referenz' => $ex['invoice_number'] ?? '']);
+                    }
+                }
+
+                // Status-Ziel & IDs
+                $targetKey = $nextState;
+                $targetId  = (int)($T[$targetKey] ?? 0);
+                // 2) Finale Tagliste berechnen (exklusiver State)
+                $finalTagIds = $wf->buildFinalTags($currentTagIds, $stateIds, $targetId);
+                // es wird wie für Rechnung auch
                 $ok = $pl->patchDocumentAtomic(
                     $docId,
                     $newTitle,        // null, wenn du den Titel nicht ändern willst
@@ -327,8 +364,11 @@ function process_one(
                     $body
                 );
                 $repo->wfSetState($docId, $nextState, '', $typeName);
+                $repo->upsertExtract($docId, $ex, $exKI);
                 break;
             }
+
+            // =====================================================================================================
 
             // Ab hier haben wir es nur mit dem Dokumententyp "Rechnung" zu tun. Wir benötigen
             // die restlichen Prüfungen, um den Zahlungsverkehr abzusichern
@@ -542,6 +582,47 @@ function process_one(
         case "APP_REQ":
             break;
 
+        case "REACT":
+            // dieser Status wird genutzt, wenn ein Dokument erneut in den Workflow aufgenommen werden
+            // soll. Z.B. wenn eine Rechnung fälschlicherweise auf "CLOSE" gesetzt wurde, aber
+            // diese doch noch einmal geprüft werden soll. Der Status wird manuell durch den Benutzer
+            // gesetzt. 
+            // Wir setzen den Status auf INIT zurück und der Poller wird das Dokument dann wieder
+            // in die Prüfung aufnehmen
+
+            // Hier fehlt noch die Logik, dass die Einträge für dms_extract und wf_job gelöscht werden
+            // damit der Workflow wieder von vorne beginnen kann
+
+            $repo->deleteExtract($docId);
+            $repo->deleteWfJob($docId);
+
+            $nextState = 'INIT';
+            $targetKey = $nextState; // z.B. 'APP_REQ' oder 'UNVOLL' …
+            $targetId  = (int)($T[$targetKey] ?? 0);
+
+            $finalTagIds = $wf->buildFinalTags($currentTagIds, $stateIds, $targetId);
+            // wir schreiben keinen neuen Titel
+            $newTitle = '';
+            // es gibt auch keine Benutzerfeld-Patches
+            $cfPatches = null;
+            // nur die TagID setzen
+            $code = 0;
+            $body = '';
+            //Log::j('DEBUG', 'AtomicPatchBeforeCall', ['Title' => $newTitle, 'Tags' => $finalTagIds, 'Patches' => $cfPatches]);
+            $ok = $pl->patchDocumentAtomic(
+                $docId,
+                $newTitle,        // null, wenn du den Titel nicht ändern willst
+                $finalTagIds,      // null, wenn Tags unverändert bleiben sollen
+                $cfPatches,        // null, wenn keine CF-Updates anstehen
+                $code,
+                $body
+            );
+            if (!$ok) {
+                Log::j('DEBUG', 'AtomicPatch', ['ok' => $ok, 'Title' => $newTitle, 'Tags' => $finalTagIds, 'Patches' => $cfPatches]);
+            }
+            $repo->wfSetState($docId, $nextState, '', $typeName);
+            break;
+
         // =============================================================================================
         // APP_REJ -> Rechnungsfreigabe wurde verweigert -> Personal, welche die Rechnungen 
         // bearbeitet, muss informiert werden -> dann weiter mit PRUEFEN
@@ -671,10 +752,6 @@ function process_one(
             $wf->applyStateTag($docId, $from, $T);
             break;
 
-        // =============================================================================================           
-        // noch unklar, was wir hier u.U. machen -> Option für die Zukunft
-        case "TRACE":
-            break;
 
         // ============================================================================================= 
         // ein unbekannter Status -> hier sollte noch Code rein, um den Admin davon in Kenntnis zu 

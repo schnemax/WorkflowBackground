@@ -150,7 +150,7 @@ final class Repository
             $nextAt = null;
         }
 
-        
+
         if ($title === '') {
             $sql = "
               INSERT INTO wf_jobs (document_id, state, assignee_email, approver_email, next_action_at, last_error, document_type)
@@ -279,6 +279,62 @@ final class Repository
             };
         } catch (\PDOException $e) {
             Log::j('DEBUG', 'get_variable', ['error' => $e]);
+            return false;
+        }
+    }
+
+    // function to delete entry from dms_extract table
+    public function deleteExtract($docId): void
+    {
+        try {
+            $stmt = $this->pdo->prepare("DELETE FROM dms_extract WHERE dms_document_id = ?");
+            $stmt->bindValue(1, $docId, PDO::PARAM_INT);
+            $stmt->execute();
+        } catch (\PDOException $e) {
+            Log::j('DEBUG', 'delete_extract', ['error' => $e]);
+        }
+    }
+
+    // function to delete entry from wf_job table
+    public function deleteWfJob($docId): void
+    {
+        try {
+            $stmt = $this->pdo->prepare("DELETE FROM wf_jobs WHERE dms_document_id = ?");
+            $stmt->bindValue(1, $docId, PDO::PARAM_INT);
+            $stmt->execute();
+        } catch (\PDOException $e) {
+            Log::j('DEBUG', 'delete_wf_job', ['error' => $e]);
+        }
+    }
+
+    // function to find entry in dkbd table
+    public function find_dkbd_entry($dkbid, $lfdnr): ?array
+    {
+        try {
+            $stmt = $this->pdo->prepare("SELECT * FROM dkbd WHERE dkbid = ? and lfdnr = ? LIMIT 1");
+            $stmt->bindValue(1, $dkbid, PDO::PARAM_INT);
+            $stmt->bindValue(2, $lfdnr, PDO::PARAM_INT);
+            $stmt->execute();
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            //Log::j('DEBUG', 'find_dkbd_entry', ['stmt' => $stmt, 'dkbid' => $dkbid, 'lfdnr' =>$lfdnr, 'row' =>$row]);
+            return $row ?: null;
+        } catch (\PDOException $e) {
+            Log::j('DEBUG', 'find_dkbd_entry', ['error' => $e]);
+            return null;
+        }
+    }
+
+    public function link_dok_to_dkbd($dokid, $dkbid, $lfdnr): ?bool
+    {
+        try {
+            $stmt = $this->pdo->prepare("UPDATE dkbd SET dmsdokid = ? WHERE dkbid = ? AND lfdnr = ? LIMIT 1");
+            $stmt->bindValue(1, $dokid, PDO::PARAM_INT);
+            $stmt->bindValue(2, $dkbid, PDO::PARAM_INT);
+            $stmt->bindValue(3, $lfdnr, PDO::PARAM_INT);
+            $stmt->execute();
+            return true;
+        } catch (\PDOException $e) {
+            Log::j('DEBUG', 'link_dok_to_dkbd', ['error' => $e]);
             return false;
         }
     }

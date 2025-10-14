@@ -96,6 +96,22 @@ try {
         exit;
     }
 
+    // PATCH /api/v1/workflow/{id}/title
+    if ($method === 'PATCH' && preg_match('#^/api/v1/workflow/(\d+)/title$#', $path, $m)) {
+        $id   = (int)$m[1];
+        $body = json_decode(file_get_contents('php://input') ?: '{}', true) ?: [];
+        $title = trim((string)($body['title'] ?? ''));
+        if ($title === '') {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'error' => 'title required']);
+            exit;
+        }
+        $ok = $api->setTitle($id, $title);
+        echo json_encode(['ok' => (bool)$ok], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+
 
     /*
     // PATCH abstrakten Typ setzen

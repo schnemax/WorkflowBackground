@@ -70,40 +70,10 @@ final class ApiController
         // ======================= translate - very static -> must improve later
         // Key → Name
         $plstatus = StateTags::keyToName($status); // "WF:Rechnungsfreigabe_erforderlich"
-        /*
-        switch ($status) {
-            case 'INIT':
-                $plstatus = 'WF:Init';
-                break;
-            case 'PRUEFEN':
-                $plstatus = 'WF:Pruefen';
-                break;
-            case 'PRUEFEN2':
-                $plstatus = 'WF:Wiedervorlage';
-                break;
-            case 'UNVOLL':
-                $plstatus = 'WF:Daten_unvollständig';
-                break;
-            case 'APP_REQ':
-                $plstatus = 'WF:Rechnungsfreigabe_erforderlich';
-                break;
-            case 'APP_OK':
-                $plstatus = 'WF:Rechnungsfreigabe_erfolgt';
-                break;
-            case 'APP_REJ':
-                $plstatus = 'WF:Freigabe_verweigert';
-                break;
-            case 'SEPA':
-                'WF:SEPA_erzeugt';
-            case 'CLOSE':
-                $plstatus = 'WF:Abgeschlossen';
-                break;
-            default:
-                return ['ok' => false, 'error' => "unknown status $status"];
-        }*/
+
         if ($plstatus === null) {
             return ['ok' => false, 'error' => "unknown status $status"];
-        }   
+        }
         // ====================================================================
 
         $tagIdint = $this->paperless->findTagIdByName($plstatus); // z. B. INIT→123, APP_REQ→124 ...
@@ -133,6 +103,32 @@ final class ApiController
         $code = 0;
         $body = '';
         $title = null;
+        //Log::j('DEBUG', 'AtomicPatchBeforeCall', ['Title' => $newTitle, 'Tags' => $finalTagIds, 'Patches' => $cfPatches]);
+        $ok = $pl->patchDocumentAtomic(
+            $docId,
+            $title,        // null, wenn du den Titel nicht ändern willst
+            $tagId,      // null, wenn Tags unverändert bleiben sollen
+            $cfPatches,        // null, wenn keine CF-Updates anstehen
+            $code,
+            $body
+        );
+        if ($ok === true) {
+            return ['ok' => true, 'Status' => 'paperless patched'];
+        } else {
+            return ['ok' => false, 'Status' => 'paperless patch failed'];
+        }
+    }
+
+    // App\Api (Fassade)
+    public function setTitle(int $docId, string $apititle): array
+    {
+        $cfg  = new Config();
+        $pl   = new PaperlessClient($cfg);
+        $code = 0;
+        $body = '';
+        $title = $apititle;
+        $tagId = null;
+        $cfPatches = null;
         //Log::j('DEBUG', 'AtomicPatchBeforeCall', ['Title' => $newTitle, 'Tags' => $finalTagIds, 'Patches' => $cfPatches]);
         $ok = $pl->patchDocumentAtomic(
             $docId,
