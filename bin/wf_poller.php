@@ -250,6 +250,9 @@ function process_one(
                 $targetKey = $nextState; // z.B. 'APP_REQ' oder 'UNVOLL' …
                 $targetId  = (int)($T[$targetKey] ?? 0);
 
+                // build wfhistory entry
+                $repo->logWfHistory($docId, $currentState, $nextState, '-intern-');
+
                 $finalTagIds = $wf->buildFinalTags($currentTagIds, $stateIds, $targetId);
                 // wir schreiben keinen neuen Titel
                 $newTitle = null;
@@ -332,7 +335,7 @@ function process_one(
                     $cfPatches[] = ['field' => (int)$fid, 'value' => $val];
                 }
                 if ($typeName == 'Barbeleg') {
-                    $newTitle = 'Barbeleg ' . ($ex['invoice_number'] ?? 'Barbeleg');
+                    $newTitle = ($ex['payment_purpose']) ?? 'Barbeleg ' . ($ex['invoice_number'] ?? 'Barbeleg');
                     preg_match('/^(\d+):(\d+)$/', $ex['invoice_number'] ?? '', $m);
                     if (count($m) === 3) {
                         $dkbid = (int)$m[1];
@@ -348,6 +351,8 @@ function process_one(
                         Log::j('WARN', 'Barbeleg link failed - invalid reference', ['doc' => $docId, 'referenz' => $ex['invoice_number'] ?? '']);
                     }
                 }
+                // build wfhistory entry
+                $repo->logWfHistory($docId, $currentState, $nextState, '-intern-');
 
                 // Status-Ziel & IDs
                 $targetKey = $nextState;
@@ -523,6 +528,9 @@ function process_one(
             $targetKey = $nextState; // z.B. 'APP_REQ' oder 'UNVOLL' …
             $targetId  = (int)($T[$targetKey] ?? 0);
 
+            // build wfhistory entry
+            $repo->logWfHistory($docId, $currentState, $nextState, '-intern-');
+
             // 1) Aktuelle Tags holen (IDs) --> hier mal ignorieren, denn wir haben dies
             // ja schon eingelesen -> siehe vorstehenden Code
             //$doc = $pl->getDocument($docId, []);  // Detail reicht
@@ -600,6 +608,9 @@ function process_one(
             $targetKey = $nextState; // z.B. 'APP_REQ' oder 'UNVOLL' …
             $targetId  = (int)($T[$targetKey] ?? 0);
 
+            // build wfhistory entry
+            $repo->logWfHistory($docId, $currentState, $nextState, '-intern-');
+
             $finalTagIds = $wf->buildFinalTags($currentTagIds, $stateIds, $targetId);
             // wir schreiben keinen neuen Titel
             $newTitle = '';
@@ -652,6 +663,9 @@ function process_one(
             $nextState = 'PRUEFEN2';
             $targetKey = $nextState; // z.B. 'APP_REQ' oder 'UNVOLL' …
             $targetId  = (int)($T[$targetKey] ?? 0);
+
+            // build wfhistory entry
+            $repo->logWfHistory($docId, $currentState, $nextState, '-intern-');
 
             $finalTagIds = $wf->buildFinalTags($currentTagIds, $stateIds, $targetId);
             // wir schreiben keinen neuen Titel
@@ -722,6 +736,9 @@ function process_one(
             //$doc = $pl->getDocument($docId, []);  // Detail reicht
             //$currentTagIds = array_map('intval', $doc['tags'] ?? []);
 
+            // build wfhistory entry
+            $repo->logWfHistory($docId, $currentState, $nextState, '-intern-');
+
             // 2) Finale Tagliste berechnen (exklusiver State)
             $finalTagIds = $wf->buildFinalTags($currentTagIds, $stateIds, $targetId);
 
@@ -782,7 +799,7 @@ function run_once_batch(
     $count = 0;
 
     do {
-        $ids = [$T['PRUEFEN'], $T['PRUEFEN2'], $T['APP_OK'], $T['APP_REJ'], $T['INIT']]; // Tag-IDs
+        $ids = [$T['PRUEFEN'], $T['PRUEFEN2'], $T['APP_OK'], $T['APP_REJ'], $T['INIT'], $T['REACT']]; // Tag-IDs
         Log::j('INFO', 'tag ids', ['ids' => $ids]);
         //$ids = [['WF:Pruefen' => $id_pruefen,'WF:Rechnungsfreigabe_erfolgt' => $id_app_ok, 'WF:Freigabe_verweigert' => $id_app_rej]];
         $res = $pl->getDocuments([

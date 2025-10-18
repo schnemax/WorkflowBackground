@@ -9,6 +9,8 @@ use App\Config;
 use DateTimeInterface;
 use DOMDocument;
 use app\Log;
+use DateTimeImmutable;
+use DateTimeZone;
 
 final class Repository
 {
@@ -337,5 +339,46 @@ final class Repository
             Log::j('DEBUG', 'link_dok_to_dkbd', ['error' => $e]);
             return false;
         }
+    }
+       /**
+     * Nur History schreiben (z. B. vom Poller).
+     * @param int         $docId
+     * @param string|null $from
+     * @param string      $to
+     * @param string      $by   default '-intern-'
+     * @param \DateTimeImmutable|null $at  default: jetzt in $this->tz
+     */
+    public function logWfHistory(
+        int $docId,
+        ?string $from,
+        string $to,
+        string $by = '-intern-',
+        $at = null
+    ): bool {
+        $at = $at ?? new DateTimeImmutable('now', new DateTimeZone("Europe/Berlin"));
+        $stamp = $at->format('Y-m-d H:i:s');
+
+        $sql = "INSERT INTO wf_history
+                (document_id, changed_at, from_status, to_status, changed_by)
+                VALUES (:id, :at, :from, :to, :by)";
+
+        // Kollisionen (gleiche Sekunde) abfangen: bis zu 3x +1 Sekunde probieren
+        for ($i = 0; $i < 3; $i++) {
+            try {
+                $stmt = $this->pdo->prepare($sql);
+                return $stmt->execute([
+                    ':id'   => $docId,
+                    ':at'   => $stamp,
+                    ':from' => $from,
+                    ':to'   => $to,
+                    ':by'   => mb_substr($by ?: '-intern-', 0, 50),
+                ]);
+            } catch (\PDOException $e) {
+                // 23000 = Duplicate entry (Primärschlüssel-Kollision)
+                if ($e->getCode() !== '23000')
+                throw $e;
+            }
+        }
+        return false;
     }
 }

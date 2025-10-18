@@ -146,7 +146,7 @@ final class Service
                 default:
                     $value = (string)$value;
             }
-            
+
             // 3) Payload-Eintrag erstellen (je nach Paperless-Version)
             // Variante A (häufig): array von Objekten
             $patchCustom[] = ['field' => (int)$def['id'], 'value' => $value];
@@ -177,7 +177,7 @@ final class Service
         return $valuesById;
     }
 
-    
+
 
     public function allowedTransitions(): array
     {
@@ -455,7 +455,7 @@ final class Service
         ]);
     }
 
-    
+
 
     /** SEPA erstellen (Credit Transfer) – Minimalbeispiel */
     public function actionCreateSepa(int $docId, array $ex, array $opts, $repo): bool
@@ -483,10 +483,10 @@ final class Service
         return true;
     }
 
-    
 
-    
-    
+
+
+
     private function normAmountCF($v): ?float
     {
         if ($v === null || $v === '') return null;
@@ -495,7 +495,7 @@ final class Service
         return is_numeric($s) ? round((float)$s, 2) : null;
     }
 
-    
+
     private function isValidBic(?string $s): bool
     {
         if (!$s) return false;
@@ -605,7 +605,7 @@ final class Service
         return $missing;
     }
 
-    
+
 
     /**
      * Baut die *finale* Tagliste:
@@ -951,4 +951,5 @@ final class Service
             $body
         );
     }
+ 
 }
