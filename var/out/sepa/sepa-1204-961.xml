@@ -2,28 +2,28 @@
 <Document xmlns="urn:iso:std:iso:20022:tech:xsd/pain.001.001.03">
   <CstmrCdtTrfInitn>
     <GrpHdr>
-      <MsgId>MSG-915-83d9305a</MsgId>
-      <CreDtTm>2025-10-09T10:56:06Z</CreDtTm>
+      <MsgId>MSG-961-2211f714</MsgId>
+      <CreDtTm>2025-10-25T10:59:08Z</CreDtTm>
       <NbOfTxs>1</NbOfTxs>
-      <CtrlSum>7.12</CtrlSum>
+      <CtrlSum>127.38</CtrlSum>
       <InitgPty>
-        <Nm>Hospiz-Gruppe "Albatros"</Nm>
+        <Nm>Hospiz-Gruppe Albatros</Nm>
       </InitgPty>
     </GrpHdr>
     <PmtInf>
-      <PmtInfId>PMT-915</PmtInfId>
+      <PmtInfId>PMT-961</PmtInfId>
       <PmtMtd>TRF</PmtMtd>
       <BtchBookg>false</BtchBookg>
       <NbOfTxs>1</NbOfTxs>
-      <CtrlSum>7.12</CtrlSum>
+      <CtrlSum>127.38</CtrlSum>
       <PmtTpInf>
         <SvcLvl>
           <Cd>SEPA</Cd>
         </SvcLvl>
       </PmtTpInf>
-      <ReqdExctnDt>2025-10-09</ReqdExctnDt>
+      <ReqdExctnDt>2025-10-25</ReqdExctnDt>
       <Dbtr>
-        <Nm>Hospiz-Gruppe "Albatros"</Nm>
+        <Nm>Hospiz-Gruppe Albatros</Nm>
       </Dbtr>
       <DbtrAcct>
         <Id>
@@ -41,23 +41,23 @@
           <EndToEndId>NOTPROVIDED</EndToEndId>
         </PmtId>
         <Amt>
-          <InstdAmt Ccy="EUR">7.12</InstdAmt>
+          <InstdAmt Ccy="EUR">127.38</InstdAmt>
         </Amt>
         <CdtrAgt>
           <FinInstnId>
-            <BICFI>DEUTDE6FXXX</BICFI>
+            <BICFI>AUGSDE77XXX</BICFI>
           </FinInstnId>
         </CdtrAgt>
         <Cdtr>
-          <Nm>Haufe Service Center GmbH</Nm>
+          <Nm>Rieger und Ludwig GmbH</Nm>
         </Cdtr>
         <CdtrAcct>
           <Id>
-            <IBAN>DE47680700300035041300</IBAN>
+            <IBAN>DE04720500000000039982</IBAN>
           </Id>
         </CdtrAcct>
         <RmtInf>
-          <Ustrd>Rechnung 0665166788 DMSID:915</Ustrd>
+          <Ustrd>Rechnungsnummer 155025681 DMSID:961</Ustrd>
         </RmtInf>
       </CdtTrfTxInf>
     </PmtInf>

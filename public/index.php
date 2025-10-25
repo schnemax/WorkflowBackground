@@ -111,18 +111,6 @@ try {
         exit;
     }
 
-
-
-    /*
-    // PATCH abstrakten Typ setzen
-    if ($method === 'PATCH' && preg_match('#^/api/v1/workflow/(\d+)/doctype$#', $path, $m)) {
-        $body = json_decode(file_get_contents('php://input') ?: '[]', true) ?: [];
-        error_log(print_r($m, true));
-        error_log(print_r($body, true));
-        echo json_encode($api->setDoctype((int)$m[1], $body), JSON_UNESCAPED_UNICODE);
-        exit;
-    }
-*/
     // M) Fallback
     http_response_code(404);
     echo json_encode(['error' => "Endpoint not found: $method $path"], JSON_UNESCAPED_UNICODE);

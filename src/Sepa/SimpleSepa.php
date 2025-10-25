@@ -37,19 +37,20 @@ final class SimpleSepa implements SepaService
         $pmtId = 'PMT-' . $docId;
 
         // Debtor (dein Unternehmen) aus Albatros Datenbank
-        //$debtorName = getenv('ORG_NAME');
-        $debtorName = $this->repo->DLookup("clientname", "parameter", "id='L'");
-        //$debtorIban = getenv('ORG_IBAN');
+        $debtorName_raw = $this->repo->DLookup("clientname", "parameter", "id='L'");
+        $debtorName = self::sanitize($debtorName_raw, 70);
+
+        //$debtorIban = kommt von den globalen Einstellungen der Albatros-Datenbank
         $query = "jahr = '" . date('Y') . "' and konto = '" . $p['konto'] . "'";
         $debtorIban = $this->repo->DLookup("iban", "konto", $query);
-        //$debtorBic  = getenv('ORG_BIC');
         $debtorBic = $this->repo->DLookup("bic", "konto", $query);
 
         // Pflichtfelder prüfen
-        //$debtorName = (string)($p['debtor_name'] ?? '');
-        //$debtorIban = preg_replace('/\s+/', '', (string)($p['debtor_iban'] ?? ''));
-        $amount     = (float)($p['invoice_amount'] ?? 0);
-        $creditorName = (string)($p['issuer_name'] ?? '');
+
+        $amount     = (float)($p['invoice_amount'] ?? 0);  // darf natürlich nicht 0 sein -> ist schon geprüft
+        $creditorName_raw = (string)($p['issuer_name'] ?? '');
+        $creditorName = self::sanitize($creditorName_raw, 70);
+
         $creditorIban = preg_replace('/\s+/', '', (string)($p['issuer_iban'] ?? ''));
 
         if ($debtorName === '' || $debtorIban === '' || $creditorName === '' || $creditorIban === '' || $amount <= 0) {
@@ -57,15 +58,18 @@ final class SimpleSepa implements SepaService
             return '';
         }
 
-        //$debtorBic   = (string)($p['debtor_bic'] ?? '');
+        // BIC noch überlegen, ob überhaupt mitgesendet werden soll -> ist innerhalb der EU nicht mehr nötig
         $creditorBic = (string)($p['issuer_bic'] ?? '');
+
         $purpose = $p['payment_purpose'] ?? '';
         if ($purpose === null or $purpose === '' or $purpose === ' ') {
             $purpose = substr((string)('Rechnung ' . $p['invoice_number']), 0, 140) ?? 'Unser Dokument ' . $docId;
         } else {
             $purpose     = substr((string)($p['payment_purpose']), 0, 140) ?? 'Unser Dokument ' . $docId;
         }
-        $purpose     = $purpose . " DMSID:" . $docId;
+        $purpose_raw     = $purpose . " DMSID:" . $docId;
+        $purpose = self::sanitize($purpose_raw, 140);
+
         $endToEnd    = $p['end_to_end'] ?? 'NOTPROVIDED';
 
         $xml = new \DOMDocument('1.0', 'UTF-8');
@@ -120,12 +124,16 @@ final class SimpleSepa implements SepaService
         $id->appendChild($xml->createElementNS($ns, 'IBAN', $debtorIban));
 
         // Debtor Agent (BIC optional je nach pain-Version; wenn bekannt, mitsenden)
-        if ($debtorBic !== '') {
-            $dbtrAgt = $xml->createElementNS($ns, 'DbtrAgt');
-            $pi->appendChild($dbtrAgt);
-            $fi = $xml->createElementNS($ns, 'FinInstnId');
-            $dbtrAgt->appendChild($fi);
-            $fi->appendChild($xml->createElementNS($ns, 'BICFI', $debtorBic));
+        // aktuell ignoriere ich den BIC, denn das würde andernfalls auch bedeuten, die BICs auf deren
+        // Gültigkeit prüfen zu müssen usw.
+        if (1 === 2) {
+            if ($debtorBic !== '') {
+                $dbtrAgt = $xml->createElementNS($ns, 'DbtrAgt');
+                $pi->appendChild($dbtrAgt);
+                $fi = $xml->createElementNS($ns, 'FinInstnId');
+                $dbtrAgt->appendChild($fi);
+                $fi->appendChild($xml->createElementNS($ns, 'BICFI', $debtorBic));
+            }
         }
 
         $pi->appendChild($xml->createElementNS($ns, 'ChrgBr', 'SLEV'));
@@ -170,7 +178,6 @@ final class SimpleSepa implements SepaService
 
         // speichern
         $dir = $repo->get_variable_value('WF_SEPA_PATH') ?? __DIR__ . '/../../var/out/sepa';
-        $dir = __DIR__ . '/../../var/out/sepa';
         if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
             \App\Log::j('ERROR', 'SEPA mkdir failed', ['dir' => $dir]);
             return '';
@@ -180,5 +187,62 @@ final class SimpleSepa implements SepaService
 
         \App\Log::j('INFO', 'SEPA created', ['doc' => $docId, 'file' => $file, 'pain' => $this->pain]);
         return $file;
+    }
+
+    /**
+     * SEPA-konforme Aufbereitung:
+     * - Umlaute/ß umschlüsseln (ae/oe/ue/ss)
+     * - nur A–Z a–z 0–9 ' + , - . : ? ( ) / und SPACE bleiben
+     * - alles andere -> SPACE
+     * - Mehrfach-Spaces zu einem SPACE
+     * - trim
+     * - optional kürzen auf $maxLen (null = kein Limit)
+     */
+    public static function sanitize(string $s, ?int $maxLen = 140): string
+    {
+        $s = trim($s);
+
+        // 1) gezielte Umschlüsselung deutscher Umlaute/ß
+        $s = strtr($s, [
+            'Ä' => 'AE',
+            'Ö' => 'OE',
+            'Ü' => 'UE',
+            'ä' => 'ae',
+            'ö' => 'oe',
+            'ü' => 'ue',
+            'ß' => 'ss',
+            '&' => 'und',
+        ]);
+
+        // 2) (optional) generische Transliteration, falls verfügbar
+        //    (macht z.B. é -> e). Wir *lassen* erlaubte Satzzeichen unangetastet.
+        if (function_exists('transliterator_transliterate')) {
+            $s = transliterator_transliterate('Any-Latin; Latin-ASCII', $s);
+        }
+
+        // 3) nur erlaubte Klasse stehen lassen, Rest -> SPACE
+        //    erlaubte Zeichen: A-Za-z0-9 ' + , - . : ? ( ) / und SPACE
+        $allowed = "A-Za-z0-9 '\\+,\\-\\.\\:\\?\\(\\)\\/";
+        $s = preg_replace('/[^' . $allowed . ']+/u', ' ', $s) ?? '';
+
+        // 4) Mehrfach-Leerzeichen reduzieren und trimmen
+        $s = preg_replace('/\\s+/', ' ', $s) ?? '';
+        $s = trim($s);
+
+        // 5) Feldlänge begrenzen (ISO20022: Name 70, Ustrd üblicherweise 140)
+        if ($maxLen !== null) {
+            $s = mb_substr($s, 0, $maxLen, 'UTF-8');
+        }
+
+        return $s;
+    }
+
+    /** Validierung gegen die obige Regel (true = bereits SEPA-konform) */
+    public static function isValid(string $s, ?int $maxLen = 140): bool
+    {
+        $allowed = "A-Za-z0-9 '\\+,\\-\\.\\:\\?\\(\\)\\/";
+        if ($s !== '' && !preg_match('/^[' . $allowed . ']+$/u', $s)) return false;
+        if ($maxLen !== null && mb_strlen($s, 'UTF-8') > $maxLen) return false;
+        return true;
     }
 }

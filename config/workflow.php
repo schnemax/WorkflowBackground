@@ -6,10 +6,12 @@ return [
     'PRUEFEN2' => 'WF:Wiedervorlage',
     'UNVOLL'=>'WF:Daten_unvollständig',
     'APP_REQ'=>'WF:Rechnungsfreigabe_erforderlich',
+    'APP_REJ'=>'WF:Freigabe_verweigert',
     'APP_OK'=>'WF:Rechnungsfreigabe_erfolgt',
     'SEPA'=>'WF:SEPA_erzeugt',
     'CLOSE'=>'WF:Close',
     'ERROR'=>'WF:Error',
+    'TRACE'=>'WF:Trace',
   ],
   'ALLOWED' => [
     'INIT' => ['INIT','PRUEFEN', 'CLOSE'],

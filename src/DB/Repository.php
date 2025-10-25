@@ -153,7 +153,7 @@ final class Repository
         }
 
 
-        if ($title === '') {
+        if ($title === null || $title === '') {
             $sql = "
               INSERT INTO wf_jobs (document_id, state, assignee_email, approver_email, next_action_at, last_error, document_type)
               VALUES (:id,:st,:as,:ap,:na,:err,:document_type)

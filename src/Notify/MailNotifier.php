@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Notify;
 
 use PHPMailer\PHPMailer\PHPMailer;
@@ -17,7 +18,8 @@ final class MailNotifier implements Notifier
     private ?string $replyTo;
     private bool $allowSelfSigned;
 
-    public static function fromEnv(): self {
+    public static function fromEnv(): self
+    {
         return new self(
             getenv('SMTP_HOST') ?: 'localhost',
             (int)(getenv('SMTP_PORT') ?: 587),
@@ -32,13 +34,25 @@ final class MailNotifier implements Notifier
     }
 
     public function __construct(
-        string $host, int $port, string $user, string $pass,
-        string $secure, string $from, string $fromName,
-        ?string $replyTo, bool $allowSelfSigned = false
+        string $host,
+        int $port,
+        string $user,
+        string $pass,
+        string $secure,
+        string $from,
+        string $fromName,
+        ?string $replyTo,
+        bool $allowSelfSigned = false
     ) {
-        $this->host = $host; $this->port = $port; $this->user = $user; $this->pass = $pass;
-        $this->secure = $secure; $this->from = $from; $this->fromName = $fromName;
-        $this->replyTo = $replyTo; $this->allowSelfSigned = $allowSelfSigned;
+        $this->host = $host;
+        $this->port = $port;
+        $this->user = $user;
+        $this->pass = $pass;
+        $this->secure = $secure;
+        $this->from = $from;
+        $this->fromName = $fromName;
+        $this->replyTo = $replyTo;
+        $this->allowSelfSigned = $allowSelfSigned;
     }
 
     public function send(string $to, string $subject, string $html, array $opts = []): bool
@@ -83,34 +97,59 @@ final class MailNotifier implements Notifier
 
             // Anhänge
             foreach ((array)($opts['attachments'] ?? []) as $att) {
-                if (is_array($att)) { $mail->addAttachment($att['path'] ?? '', $att['name'] ?? ''); }
-                elseif (is_string($att)) { $mail->addAttachment($att); }
+                if (is_array($att)) {
+                    $mail->addAttachment($att['path'] ?? '', $att['name'] ?? '');
+                } elseif (is_string($att)) {
+                    $mail->addAttachment($att);
+                }
             }
 
             $mail->Subject = $subject;
+            // vor $mail->send()
             $mail->isHTML(true);
             $mail->Body    = $html;
+            $mail->Timeout = 15;
+            $mail->SMTPKeepAlive = false;
             $mail->AltBody = $opts['text'] ?? self::htmlToText($html);
-
+            Log::j('DEBUG', 'going to send mail', ['to' => $to, 'subject' => $subject, 'host' => $this->host, 'port' => $this->port, 'from ' => $this->from, 'user' => $mail->Username, 'password' => $mail->Password]);
             $mail->send();
-            Log::j('DEBUG','mail.sent', ['to'=>$to, 'subject'=>$subject]);
             return true;
         } catch (Exception $e) {
-            Log::j('ERROR','mail.fail', ['to'=>$to, 'subject'=>$subject, 'error'=>$e->getMessage()]);
+            Log::j('ERROR', 'mail.fail', ['to' => $to, 'subject' => $subject, 'error' => $e->getMessage()]);
             return false;
         }
     }
 
-    private function normalizeRecipients(string|array $r): array {
-        if (is_array($r)) return array_values(array_filter(array_map('trim',$r)));
+    private function normalizeRecipients(string|array $r): array
+    {
+        if (is_array($r)) return array_values(array_filter(array_map('trim', $r)));
         if (strpos($r, ',') !== false) return array_values(array_filter(array_map('trim', explode(',', $r))));
-        $r = trim($r); return $r ? [$r] : [];
+        $r = trim($r);
+        return $r ? [$r] : [];
     }
 
-    private static function htmlToText(string $html): string {
+    private static function htmlToText(string $html): string
+    {
         $t = preg_replace('#<br\s*/?>#i', "\n", $html);
         $t = preg_replace('#</p>#i', "\n\n", $t);
         $t = strip_tags($t ?? '');
         return trim($t ?? '');
+    }
+    function normalizeToUtf8(string $s): string
+    {
+        // Falls schon korrekt UTF-8, nichts tun
+        if (mb_detect_encoding($s, 'UTF-8', true)) {
+            return $s;
+        }
+
+        // Häufige Quellen probieren (Windows-1252, ISO-8859-1, ASCII)
+        $converted = @mb_convert_encoding($s, 'UTF-8', 'Windows-1252,ISO-8859-1,ASCII');
+        if ($converted !== false) {
+            return $converted;
+        }
+
+        // Fallback: iconv
+        $iconv = @iconv('Windows-1252', 'UTF-8//IGNORE', $s);
+        return $iconv !== false ? $iconv : $s;
     }
 }

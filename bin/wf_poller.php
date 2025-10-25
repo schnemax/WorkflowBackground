@@ -4,7 +4,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/../bootstrap.php';
-
+require __DIR__ . '/../vendor/autoload.php';
 
 use App\Config;
 use App\Log;
@@ -19,10 +19,64 @@ use App\Sepa\SimpleSepa;
 use App\Http;
 use App\Workflow\StateTags;
 
+App\Env::loadFromFile(getenv('WORKER_ENV_FILE') ?: __DIR__ . '/../workflow.env');
+
+Log::init(); // liest optional LOG_LEVEL
+
+$APP_ROOT = rtrim(getenv('APP_ROOT') ?: '/var/ppl/app', '/');
+$VAR_DIR  = $APP_ROOT . '/var';
+@is_dir($VAR_DIR) || @mkdir($VAR_DIR, 0775, true);
+
+// Stop/Reload-Dateien (konfigurierbar, aber Defaults reichen)
+$STOP   = getenv('WF_STOP_FILE')   ?: "$VAR_DIR/wf.stop";
+$RELOAD = getenv('WF_RELOAD_FILE') ?: "$VAR_DIR/wf.reload";
+$SLEEP_US = (int)(getenv('WF_SLEEP_US') ?: 2_000_000); // 2s
+
+// Paperless-Ziele (Host, da Poller außerhalb Docker läuft)
+$BASE  = rtrim(getenv('PAPERLESS_URL') ?: 'http://127.0.0.1:8010', '/');
+$TOKEN = getenv('PAPERLESS_TOKEN') ?: '';
+
+Log::j('INFO', 'envvars', ['approot' => $APP_ROOT, 'vardir' => $VAR_DIR, 'base' => $BASE, 'token' => $TOKEN]);
+
 $ntf = class_exists(\PHPMailer\PHPMailer\PHPMailer::class)
     ? MailNotifier::fromEnv()
     : new LogNotifier();
 
+
+
+
+// ---------------------------- Boot ----------------------------
+
+$cfg  = new Config();
+$pl   = new PaperlessClient($cfg);
+$repo = new Repository($cfg);
+$ext  = new Extractor();
+$sepa = new SimpleSepa($repo);
+$wf   = new WF($pl, $repo, $ntf, $sepa);
+//$ntf  = new Notifier();
+Log::$level = 'DEBUG';
+// --------------------------- Self Checks ----------------------------------------
+// ---------- SELF-CHECK ----------
+[$ok, $problems] = selfCheck($BASE, $TOKEN);
+if ($ok) {
+    Log::j('INFO', 'selfcheck_ok', ['base' => $BASE]);
+} else {
+    Log::j('ERROR', 'selfcheck_fail', ['base' => $BASE, 'issues' => $problems]);
+    // Safe-Mode: wir starten trotzdem und versuchen periodisch erneut
+}
+
+// ---------- BOOT (Tags vorbereiten, aber nicht zwingend) ----------
+$STATE = \App\Workflow\StateTags::MAP ?? [];        // ['INIT'=>'WF:Init', ...]
+$TAGCACHE = $VAR_DIR . '/tagmap.json';
+$TAGS = bootstrapTagMap($STATE, $BASE, $TOKEN, $TAGCACHE);
+
+$S = $STATE;
+
+// IDs pro Key (robust, weil nicht lokalisiert)
+$T = [];
+foreach ($S as $key => $name) {
+    $T[$key] = $wf->ensureTag($name); // legt Tag an (falls nötig) und gibt ID zurück
+}
 
 // ---------------------------- CLI-Options ----------------------------
 $opts = ['once' => false, 'doc' => null, 'dry' => false, 'debug' => false];
@@ -35,24 +89,6 @@ foreach ($argv ?? [] as $a) {
     } elseif (preg_match('/^--doc=(\d+)$/', $a, $m)) $opts['doc'] = (int)$m[1];
 }
 
-// ---------------------------- Boot ----------------------------
-Log::init(); // liest optional LOG_LEVEL
-$cfg  = new Config();
-$pl   = new PaperlessClient($cfg);
-$repo = new Repository($cfg);
-$ext  = new Extractor();
-$sepa = new SimpleSepa($repo);
-$wf   = new WF($pl, $repo, $ntf, $sepa);
-//$ntf  = new Notifier();
-
-// Array für die Umschlüsselung Key => Tag-Name
-$S = StateTags::MAP;
-
-// IDs pro Key (robust, weil nicht lokalisiert)
-$T = [];
-foreach ($S as $key => $name) {
-    $T[$key] = $wf->ensureTag($name); // legt Tag an (falls nötig) und gibt ID zurück
-}
 // ---------------------------- Main ----------------------------
 if (!is_dir('/app/var')) @mkdir('/app/var', 0775, true);
 @file_put_contents('/app/var/wf_last_run.txt', date('c'));
@@ -64,32 +100,50 @@ if (!empty($opts['doc'])) {
     exit(0);
 }
 
-
 // für Testzwecke den Poller so aufrufen, dass er alle Dokumente einsammelt -> diese
 // abarbeitet und dann abschliesst. Im Echtbetrieb wird das als interner Endlosbetrieb
 // gestartet. Nach jedem erfolgten Aufruf wird dann "geschlafen".
 
-$STOP   = getenv('WF_STOP_FILE')   ?: '/app/var/wf.stop';
-$RELOAD = getenv('WF_RELOAD_FILE') ?: '/app/var/wf.reload';
-$SLEEP  = (int)(getenv('WF_SLEEP') ?: 2000000);
+$retryAt = time();        // für periodische Re-Checks
 
 while (true) {
     if (is_file($STOP)) {
-        fwrite(STDOUT, "[PAUSE] stop-flag\n");
-        sleep(5);
-        continue;
+        Log::j('INFO', 'stop_file_detected', ['file' => $STOP]);
+        @unlink($STOP);
+        break; // sauber beenden
     }
+
+    // RELOAD (z. B. ENV neu laden, Tag-Map neu)
     if (is_file($RELOAD)) {
+        Log::j('INFO', 'reload_file_detected', ['file' => $RELOAD]);
         @unlink($RELOAD);
-        fwrite(STDOUT, "[RELOAD] exiting for docker restart\n");
-        exit(0); // Container wird durch restart-policy neu gestartet
+        \App\Env::loadFromFile(getenv('WORKER_ENV_FILE') ?: __DIR__ . '/../workflow.env');
+        // Base/Token ggf. neu setzen:
+        $BASE  = rtrim(getenv('PAPERLESS_URL') ?: 'http://127.0.0.1:8010', '/');
+        $TOKEN = getenv('PAPERLESS_API_TOKEN') ?: '';
+        $TAGS  = bootstrapTagMap($STATE, $BASE, $TOKEN, $TAGCACHE);
     }
 
-    run_once_batch($opts, $pl, $repo, $ext, $wf, $ntf, $T, $S);
-    if ($opts['once']) break;
+    // Periodischer Self-Check/Retry (alle 60s)
+    if (time() >= $retryAt) {
+        [$ok, $problems] = selfCheck($BASE, $TOKEN);
+        if (!$ok) {
+            Log::j('WARN', 'selfcheck_retry_fail', ['issues' => $problems]);
+            $retryAt = time() + 60;
+        } else {
+            $retryAt = time() + 300; // 5 Minuten, wenn stabil
+        }
+    }
 
-    // kurze Pause, CPU schonen
-    sleep(120);
+    try {
+        run_once_batch($opts, $pl, $repo, $ext, $wf, $ntf, $T, $S);
+        if ($opts['once']) break;
+        // kurze Pause, CPU schonen
+        sleep(120);
+    } catch (Throwable $e) {
+        Log::j('WARN', 'http_client_reset_fail', ['error' => $e->getMessage()]);
+        break; // exit until we're stable
+    }
 }
 
 
@@ -115,7 +169,7 @@ function process_one(
 
     $doc = $pl->getDocumentExpanded($docId, ['expand' => 'document_type']);
 
-    Log::j('DEBUG', 'process_one->doc', ['doc' => $doc]);
+    //Log::j('DEBUG', 'process_one->doc', ['doc' => $doc]);
     if (!$doc || empty($doc['id'])) {
         Log::j('ERROR', 'doc.missing', ['doc' => $docId]);
         return;
@@ -127,9 +181,6 @@ function process_one(
 
     // die aktuellen Tags (e.g. WF:PRUEFEN, etc.) werden im array currentTagIds verfügbar gemacht
     $currentTagIds   = array_map('intval', $doc['tags'] ?? []);
-    Log::j('DEBUG', 'tagIDs', ['ids are' => $currentTagIds]);
-    $traceLog = in_array($T['TRACE'], $currentTagIds, true);
-    if ($traceLog) Log::$level = 'DEBUG';
 
     // gewünschten State aus Tags lesen (Benutzereingriff)current_state_key
     // $ALLOWED enthält alle gültigen State-IDs (intern normalisiert - nicht der Tag-Ausdruck in paperless)
@@ -140,7 +191,6 @@ function process_one(
     // gemeinsame Vorbereitungen -> gemeinsame Variablen in der nachfolgenden
     // Verarbeitung
     $href   = $pl->documentUrl($docId);   //  geforderte URL-Variable  (zeigt auf Workflow Application)
-    Log::j('DEBUG', 'href', ['href is' => $href]);
 
     $stateIds  = array_filter([
         $T['INIT'] ?? null,
@@ -335,7 +385,7 @@ function process_one(
                     $cfPatches[] = ['field' => (int)$fid, 'value' => $val];
                 }
                 if ($typeName == 'Barbeleg') {
-                    $newTitle = ($ex['payment_purpose']) ?? 'Barbeleg ' . ($ex['invoice_number'] ?? 'Barbeleg');
+                    $newTitle = ('KassenBuch: ' . $ex['invoice_number']) ?? 'Barbeleg ' . ' ' . ($ex['payment_purpose'] ?? '');
                     preg_match('/^(\d+):(\d+)$/', $ex['invoice_number'] ?? '', $m);
                     if (count($m) === 3) {
                         $dkbid = (int)$m[1];
@@ -368,7 +418,7 @@ function process_one(
                     $code,
                     $body
                 );
-                $repo->wfSetState($docId, $nextState, '', $typeName);
+                $repo->wfSetState($docId, $nextState, $newtitle, $typeName);
                 $repo->upsertExtract($docId, $ex, $exKI);
                 break;
             }
@@ -469,7 +519,7 @@ function process_one(
                     $nextState = !empty($ex['direct_debit']) ? 'CLOSE' : 'APP_REQ';
                     if (!$opts['dry']) {
                         if ($nextState === 'APP_REQ') {
-
+                            Log::j('DEBUG', 'going to send invoice approval request', ['doc' => $docId]);
                             $wf->common_send(
                                 $docId,
                                 $doc,
@@ -548,9 +598,9 @@ function process_one(
             $cfPatches = [];
             foreach ($patches /* dein Dict */ as $fid => $val) {
                 // Typ-Sauberkeit:
-                if ((int)$fid === 15) { // falls 15 = Betrag (decimal)
-                    $val = number_format((float)$val, 2, '.', ''); // "7676.00"
-                }
+                //if ((int)$fid === 15) { // falls 15 = Betrag (decimal)
+                //    $val = number_format((float)$val, 2, '.', ''); // "7676.00"
+                //}
                 $cfPatches[] = ['field' => (int)$fid, 'value' => $val];
             }
 
@@ -613,7 +663,7 @@ function process_one(
 
             $finalTagIds = $wf->buildFinalTags($currentTagIds, $stateIds, $targetId);
             // wir schreiben keinen neuen Titel
-            $newTitle = '';
+            $newTitle = null;
             // es gibt auch keine Benutzerfeld-Patches
             $cfPatches = null;
             // nur die TagID setzen
@@ -669,7 +719,7 @@ function process_one(
 
             $finalTagIds = $wf->buildFinalTags($currentTagIds, $stateIds, $targetId);
             // wir schreiben keinen neuen Titel
-            $newTitle = '';
+            $newTitle = null;
             // es gibt auch keine Benutzerfeld-Patches
             $cfPatches = null;
             // nur die TagID setzen
@@ -687,7 +737,7 @@ function process_one(
             if (!$ok) {
                 Log::j('DEBUG', 'AtomicPatch', ['ok' => $ok, 'Title' => $newTitle, 'Tags' => $finalTagIds, 'Patches' => $cfPatches]);
             }
-            $repo->wfSetState($docId, $nextState, '', $document_type);
+            $repo->wfSetState($docId, $nextState, '', $typeName);
             break;
 
         // =============================================================================================
@@ -800,7 +850,7 @@ function run_once_batch(
 
     do {
         $ids = [$T['PRUEFEN'], $T['PRUEFEN2'], $T['APP_OK'], $T['APP_REJ'], $T['INIT'], $T['REACT']]; // Tag-IDs
-        Log::j('INFO', 'tag ids', ['ids' => $ids]);
+        //Log::j('INFO', 'tag ids', ['ids' => $ids]);
         //$ids = [['WF:Pruefen' => $id_pruefen,'WF:Rechnungsfreigabe_erfolgt' => $id_app_ok, 'WF:Freigabe_verweigert' => $id_app_rej]];
         $res = $pl->getDocuments([
             'page'        => $page,
@@ -818,7 +868,7 @@ function run_once_batch(
         $page++;
     } while (!empty($res['next']));
 
-    Log::j('INFO', 'batch.done', ['processed' => $count]);
+    //Log::j('INFO', 'batch.done', ['processed' => $count]);
 }
 
 // ---------------------------- Helpers ----------------------------
@@ -851,4 +901,118 @@ function backoffFetchContent(PaperlessClient $pl, int $docId, float $timeout = 9
         $delay = min($delay * 2, 2.0);
     } while (microtime(true) < $deadline);
     return [$doc ?? [], ''];
+}
+
+
+/** kleine cURL-Hilfe */
+function httpGetJson(string $url, string $token, ?int &$code = null): array
+{
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_HTTPHEADER     => [
+            'Accept: application/json',
+            'Authorization: Token ' . $token,
+            'Expect:',
+        ],
+    ]);
+    $body = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $ctype = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+    $errno = curl_errno($ch);
+    $err  = curl_error($ch);
+    curl_close($ch);
+
+    if ($code !== 200) {
+        \App\Log::j('WARN', 'http', [
+            'url' => $url,
+            'http' => $code,
+            'ctype' => $ctype,
+            'errno' => $errno,
+            'error' => $err,
+        ]);
+    }
+    $json = json_decode((string)$body, true);
+    return is_array($json) ? $json : [];
+}
+
+/** Self-Check: 3 obligatorische Prüfungen */
+function selfCheck(string $base, string $token): array
+{
+    $ok = true;
+    $problems = [];
+
+
+
+    // 2) Doctypes erreichbar
+    $c2 = null;
+    $u2 = $base . '/api/document_types/?page_size=1';
+    $r2 = httpGetJson($u2, $token, $c2);
+    if ($c2 !== 200) {
+        $ok = false;
+        $problems[] = "document_types http=$c2";
+    }
+
+    // 3) Tags API erreichbar (keine Namenssuche hier)
+    $c3 = null;
+    $u3 = $base . '/api/tags/?page_size=1';
+    $r3 = httpGetJson($u3, $token, $c3);
+    if ($c3 !== 200) {
+        $ok = false;
+        $problems[] = "tags http=$c3";
+    }
+
+    return [$ok, $problems];
+}
+
+/** Tag-ID nach Name (robust, mit Fallback) */
+function resolveTagId(string $base, string $token, string $name): ?int
+{
+    $q = rawurlencode($name);
+
+    foreach (["search=$q", "name__iexact=$q"] as $param) {
+        $c = null;
+        $r = httpGetJson("$base/api/tags/?$param&page_size=50", $token, $c);
+        if ($c === 200 && !empty($r['results'])) {
+            foreach ($r['results'] as $t) {
+                if (strcasecmp($t['name'] ?? '', $name) === 0) return (int)$t['id'];
+            }
+        }
+    }
+    // Fallback: alles durchblättern
+    for ($url = "$base/api/tags/?page_size=100"; $url;) {
+        $c = null;
+        $r = httpGetJson($url, $token, $c);
+        if ($c !== 200) break;
+        foreach ($r['results'] ?? [] as $t) {
+            if (strcasecmp($t['name'] ?? '', $name) === 0) return (int)$t['id'];
+        }
+        $url = $r['next'] ?? null;
+    }
+    return null;
+}
+
+/** Tag-Map initialisieren + cachen, nie crashen */
+function bootstrapTagMap(array $needed, string $base, string $token, string $cacheFile): array
+{
+    $map = [];
+    //if (is_readable($cacheFile)) {
+    //    $raw = json_decode((string)@file_get_contents($cacheFile), true);
+    //    if (is_array($raw)) $map = $raw;
+    //}
+    foreach ($needed as $key => $tagName) {
+        if (!empty($map[$key])) continue;
+        $id = resolveTagId($base, $token, $tagName);
+        if ($id) {
+            $map[$key] = $id;
+            \App\Log::j('DEBUG', 'tag_resolved', ['key' => $key, 'name' => $tagName, 'id' => $id]);
+        } else {
+            \App\Log::j('WARN', 'tag_missing', ['key' => $key, 'name' => $tagName]);
+        }
+    }
+    @file_put_contents($cacheFile, json_encode($map, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    return $map;
 }

@@ -24,7 +24,7 @@ final class Service
 
     public function buildTitle(string $type, ?string $issuer, array $ex, ?string $invDate): string
     {
-        //$issuer = $doc['correspondent__name'] ?? $doc['correspondent_name'] ?? ($doc['correspondent']['name'] ?? null);
+        
         $parts = array_filter([
             //$type,
             $issuer ? trim($issuer) : null,
