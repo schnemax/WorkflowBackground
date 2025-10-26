@@ -29,9 +29,8 @@ final class Config
     // WORKFLOW_URL
     $this->workflowUrl = rtrim(getenv('WORKFLOW_URL'));
 
-    // PAPERLESS_URL mit Fallback
-    $this->paperlessUrl     = rtrim(
-      getenv('PAPERLESS_URL') ?: getenv('PAPERLESS_BASE_URL') ?: '',
+    // PAPERLESS_URL (poller kommuniziert nur intern mit Paperless, nicht mit dem Frontend  )
+    $this->paperlessUrl     = rtrim(getenv('API_TO_PAPERLESS_URL') ?: 'http://127.0.0.1:8010',
       '/'
     );
     if ($this->paperlessUrl === '' || !parse_url($this->paperlessUrl, PHP_URL_HOST)) {

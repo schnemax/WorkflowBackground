@@ -2,8 +2,8 @@
 <Document xmlns="urn:iso:std:iso:20022:tech:xsd/pain.001.001.03">
   <CstmrCdtTrfInitn>
     <GrpHdr>
-      <MsgId>MSG-961-2211f714</MsgId>
-      <CreDtTm>2025-10-25T10:59:08Z</CreDtTm>
+      <MsgId>MSG-961-4bca1051</MsgId>
+      <CreDtTm>2025-10-26T07:43:35Z</CreDtTm>
       <NbOfTxs>1</NbOfTxs>
       <CtrlSum>127.38</CtrlSum>
       <InitgPty>
@@ -21,7 +21,7 @@
           <Cd>SEPA</Cd>
         </SvcLvl>
       </PmtTpInf>
-      <ReqdExctnDt>2025-10-25</ReqdExctnDt>
+      <ReqdExctnDt>2025-10-26</ReqdExctnDt>
       <Dbtr>
         <Nm>Hospiz-Gruppe Albatros</Nm>
       </Dbtr>
@@ -30,11 +30,6 @@
           <IBAN>DE47370205000007872000</IBAN>
         </Id>
       </DbtrAcct>
-      <DbtrAgt>
-        <FinInstnId>
-          <BICFI>BFSWDE33XXX</BICFI>
-        </FinInstnId>
-      </DbtrAgt>
       <ChrgBr>SLEV</ChrgBr>
       <CdtTrfTxInf>
         <PmtId>

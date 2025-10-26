@@ -231,7 +231,7 @@ final class Client
 
     public function ensureTag(string $name): ?int
     {
-        $q = $this->request('GET', '/api/tags/?page_size=1&name__iexact=' . urlencode($name));
+        $q = $this->request('GET', '/api/tags/?page_size=1&search=' . urlencode($name));
         $id = $q['body']['results'][0]['id'] ?? null;
         if ($id) return (int)$id;
         $c = $this->request('POST', '/api/tags/', ['name' => $name]);

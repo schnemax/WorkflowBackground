@@ -772,8 +772,30 @@ function process_one(
                 $sepacreated = $wf->actionCreateSepa($docId, $ex, $opts, $repo);
                 // wenn ein Fehler bei der Erstellung passiert ist, dann keine Update das aktuellen Status
                 if (!$sepacreated) {
+                    $repo->logWfHistory($docId, $currentState, 'ERROR', '-intern-');
                     return;
                 } else {
+                    $repo->logWfHistory($docId, $currentState, 'SEPA', '-intern-');
+                    $tplBodyRaw = $repo->get_variable_value('WF:SEPA_erstellt') ?? '';
+                    $tplBody    = $wf->normalize_template($tplBodyRaw); // <<< WICHTIG
+                    $notiz = null;
+                    $missing = [];
+
+                    $vars = [
+                        'DOK_ID'       => $docId,
+                        'MISSING_LIST' => $wf->build_missing_list($missing),
+                        'NOTIZ'        => $notiz,
+                        'URL'          => $href,                                  // für href und sichtbaren Text nutzbar
+                        'URL_TEXT'     => htmlspecialchars($href, ENT_NOQUOTES),  // falls du {{URL_TEXT}} im sichtbaren Teil nutzen willst
+                    ];
+                    $body = trim($tplBody) !== '' ? $wf->render_template($tplBody, $vars)
+                        : "<p>SEPA-Datei erstellt<a href=\"{$href}\">öffnen</a></p>";
+                    $subject = "SEPA-Datei erstellt: Dok #{$docId}";
+                    $ntf->send(
+                        $repo->get_variable_value('WF_DEFAULT_ACTOR') ?: 'it_admin@albatros-hospiz.de',
+                        $subject,
+                        $body
+                    );
                     $nextState = 'CLOSE';
                 }
             }
