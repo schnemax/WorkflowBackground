@@ -36,7 +36,7 @@ $SLEEP_US = (int)(getenv('WF_SLEEP_US') ?: 2_000_000); // 2s
 $BASE  = rtrim(getenv('PAPERLESS_URL') ?: 'http://127.0.0.1:8010', '/');
 $TOKEN = getenv('PAPERLESS_TOKEN') ?: '';
 
-Log::j('INFO', 'envvars', ['approot' => $APP_ROOT, 'vardir' => $VAR_DIR, 'base' => $BASE, 'token' => $TOKEN]);
+//Log::j('INFO', 'envvars', ['approot' => $APP_ROOT, 'vardir' => $VAR_DIR, 'base' => $BASE, 'token' => $TOKEN]);
 
 $ntf = class_exists(\PHPMailer\PHPMailer\PHPMailer::class)
     ? MailNotifier::fromEnv()
@@ -125,15 +125,15 @@ while (true) {
     }
 
     // Periodischer Self-Check/Retry (alle 60s)
-    if (time() >= $retryAt) {
-        [$ok, $problems] = selfCheck($BASE, $TOKEN);
-        if (!$ok) {
-            Log::j('WARN', 'selfcheck_retry_fail', ['issues' => $problems]);
-            $retryAt = time() + 60;
-        } else {
-            $retryAt = time() + 300; // 5 Minuten, wenn stabil
-        }
-    }
+    //if (time() >= $retryAt) {
+    //    [$ok, $problems] = selfCheck($BASE, $TOKEN);
+    //    if (!$ok) {
+    //        Log::j('WARN', 'selfcheck_retry_fail', ['issues' => $problems]);
+    //        $retryAt = time() + 60;
+    //    } else {
+    //        $retryAt = time() + 300; // 5 Minuten, wenn stabil
+    //    }
+    //}
 
     try {
         run_once_batch($opts, $pl, $repo, $ext, $wf, $ntf, $T, $S);
@@ -236,7 +236,12 @@ function process_one(
     // auf den Dokumententyp gleich vorneweg
     //$declaredType = $docFull['document_type__name'] ?? null;
     $declaredType = $docFull['document_type'] ?? null;
-    $typeName = $pl->getDocumentTypeName($declaredType);
+    if ($declaredType === null) {
+        $typeName = 'Unbekannt';
+        $declaredType = getenv('DOCTYPEIDUNBEKANNT') ?: '01'; // ID für Unbekannt -> Achtung: 01 ist irgendwas anderes
+    } else {
+        $typeName = $pl->getDocumentTypeName($declaredType);
+    }
     Log::j('DEBUG', 'getDocumentTypeName', ['type' => $typeName, 'declaredType' => $declaredType]);
 
     // festhalten, ob wf_job-eintrag für dieses Dokument bereits besteht -> wird benötigt um
@@ -267,11 +272,13 @@ function process_one(
         case 'LG_Lohnsteuer':
         case 'LG_KK':
         case 'Bescheid':
+        case 'Unbekannt':
             break;
 
         // keiner der vorgenannten Dokumententypen -> Workflow wird geschlossen
         default:
-            Log::j('INFO', 'skip.not-relevant', ['doc' => $docId, 'type' => $typeName]);
+            $typeName = 'Unbekannt';
+            //Log::j('INFO', 'skip.not-relevant', ['doc' => $docId, 'type' => $typeName]);
             // ==> ============= hier braucht es noch eine Nachricht - ist defacto ein Fehler
             if (!$opts['dry']) {
                 $tplBodyRaw = $repo->get_variable_value('WF:irrelevant') ?? '';
@@ -296,7 +303,7 @@ function process_one(
                 );
                 // dieser Fall muss hier nun abgeschlossen werden -> es wird kein dms_extract bzw.
                 // wf_job geschrieben werden
-                $nextState = 'IGNORE';
+                $nextState = 'CLOSE';
                 $targetKey = $nextState; // z.B. 'APP_REQ' oder 'UNVOLL' …
                 $targetId  = (int)($T[$targetKey] ?? 0);
 
@@ -305,7 +312,7 @@ function process_one(
 
                 $finalTagIds = $wf->buildFinalTags($currentTagIds, $stateIds, $targetId);
                 // wir schreiben keinen neuen Titel
-                $newTitle = null;
+                $newTitle = '';
                 // es gibt auch keine Benutzerfeld-Patches
                 $cfPatches = null;
                 // nur die TagID setzen
@@ -323,6 +330,7 @@ function process_one(
                 if (!$ok) {
                     Log::j('DEBUG', 'AtomicPatch', ['ok' => $ok, 'Title' => $newTitle, 'Tags' => $finalTagIds, 'Patches' => $cfPatches]);
                 }
+                $repo->wfSetState($docId, $nextState, $newTitle, $typeName);
                 Log::j('INFO', 'process_one.done', ['doc' => $docId ?? '0', 'exit_stop' => "keine Rechnung"]);
                 return;
             }
@@ -384,8 +392,8 @@ function process_one(
                     }
                     $cfPatches[] = ['field' => (int)$fid, 'value' => $val];
                 }
-                if ($typeName == 'Barbeleg') {
-                    $newTitle = ('KassenBuch: ' . $ex['invoice_number']) ?? 'Barbeleg ' . ' ' . ($ex['payment_purpose'] ?? '');
+                if ($typeName === 'Barbeleg') {
+                    $newTitle = ('Kassenbuch: ' . $ex['invoice_number']) ?? 'Barbeleg ' . ' ' . ($ex['payment_purpose'] ?? '');
                     preg_match('/^(\d+):(\d+)$/', $ex['invoice_number'] ?? '', $m);
                     if (count($m) === 3) {
                         $dkbid = (int)$m[1];
@@ -418,7 +426,7 @@ function process_one(
                     $code,
                     $body
                 );
-                $repo->wfSetState($docId, $nextState, $newtitle, $typeName);
+                $repo->wfSetState($docId, $nextState, $newTitle, $typeName);
                 $repo->upsertExtract($docId, $ex, $exKI);
                 break;
             }

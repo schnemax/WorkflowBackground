@@ -107,6 +107,7 @@ final class MailNotifier implements Notifier
             $mail->Subject = $subject;
             // vor $mail->send()
             $mail->isHTML(true);
+            $html = preg_replace('/[^A-Za-z0-9\. -\â\€\"\[\]\/]/', '', $html);
             $mail->Body    = $html;
             $mail->Timeout = 15;
             $mail->SMTPKeepAlive = false;

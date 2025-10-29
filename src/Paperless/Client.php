@@ -768,6 +768,7 @@ final class Client
         return $this->payloadToArray($r);
     }
 
+
     // src/Paperless/Client.php (Ausschnitt)
     public function listDocumentTypes(string $url = '/api/document_types/'): array
     {
