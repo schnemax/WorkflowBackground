@@ -818,4 +818,92 @@ final class Client
         throw new HttpException($code, is_array($json));
         return is_array($json) ? $json : ['ok' => true];
     }
+
+     /**
+     * Liefert die ID eines Dokumenttyps anhand des Klartext-Namens.
+     * - exakter Match (case-insensitive) über Feld "name"
+     * - bei Mehrdeutigkeit Exception
+     * - bei nicht gefunden: null
+     */
+    public function getDocumentTypeIdByName(string $docTypeName): ?int
+    {
+        $want = self::norm($docTypeName);
+        $rows = $this->request('GET', '/api/document_types/');
+        $matches = [];
+
+        foreach ($rows as $row) {
+            $name = isset($row['name']) ? self::norm((string)$row['name']) : '';
+            if ($name === $want) {
+                $matches[] = $row;
+            }
+        }
+
+        if (count($matches) === 1) {
+            return (int)$matches[0]['id'];
+        }
+ 
+        // Fallback: eindeutiger Teilstring?
+        $subs = array_values(array_filter($rows, function ($row) use ($want) {
+            $name = isset($row['name']) ? self::norm((string)$row['name']) : '';
+            return $name !== '' && mb_strpos($name, $want) !== false;
+        }));
+
+        if (count($subs) === 1) {
+            return (int)$subs[0]['id'];
+        }
+
+
+        return null; // nichts gefunden
+    }
+
+    /**
+     * Liefert die ID eines Benutzerfelds (Custom Field) anhand des Namens.
+     * - exakter Match über "name" ODER "slug" (case-insensitive)
+     * - bei Mehrdeutigkeit Exception
+     * - bei nicht gefunden: null
+     */
+    public function getCustomFieldIdByName(string $fieldName): ?int
+    {
+        $want = self::norm($fieldName);
+        $rows = $this->request('GET', '/api/custom_fields/');
+        $matches = [];
+
+        foreach ($rows as $row) {
+            $name = isset($row['name']) ? self::norm((string)$row['name']) : '';
+            $slug = isset($row['slug']) ? self::norm((string)$row['slug']) : '';
+            if ($name === $want || ($slug !== '' && $slug === $want)) {
+                $matches[] = $row;
+            }
+        }
+
+        if (count($matches) === 1) {
+            return (int)$matches[0]['id'];
+        }
+
+
+        // Fallback: eindeutiger Teilstring (name oder slug)
+        $subs = array_values(array_filter($rows, function ($row) use ($want) {
+            $name = isset($row['name']) ? self::norm((string)$row['name']) : '';
+            $slug = isset($row['slug']) ? self::norm((string)$row['slug']) : '';
+            $hitName = ($name !== '' && mb_strpos($name, $want) !== false);
+            $hitSlug = ($slug !== '' && mb_strpos($slug, $want) !== false);
+            return $hitName || $hitSlug;
+        }));
+
+        if (count($subs) === 1) {
+            return (int)$subs[0]['id'];
+        }
+
+
+        return null;
+    }
+ /** Normalisiert Namen für robusten Vergleich. */
+    private static function norm(string $s): string
+    {
+        $s = trim($s);
+        $s = mb_strtolower($s, 'UTF-8');
+        // einfache Normalisierung (Leerzeichen vereinheitlichen)
+        $s = preg_replace('/\s+/u', ' ', $s);
+        return $s;
+    }
 }

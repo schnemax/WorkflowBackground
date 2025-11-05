@@ -231,6 +231,8 @@ function process_one(
         'note'            => 'Notizen',
     ];
 
+    $doctypeIDUnbekannt = $pl->getDocumentTypeIdByName('Unbekannt');
+
     // Dokumenttyp (Webhook/Regel hat Vorrang, Heuristik Fallback)
     // die gesamte Logik ist aktuell nur für Rechnungen vorgesehen. Deshalb die Prüfung
     // auf den Dokumententyp gleich vorneweg
@@ -238,7 +240,7 @@ function process_one(
     $declaredType = $docFull['document_type'] ?? null;
     if ($declaredType === null) {
         $typeName = 'Unbekannt';
-        $declaredType = getenv('DOCTYPEIDUNBEKANNT') ?: '01'; // ID für Unbekannt -> Achtung: 01 ist irgendwas anderes
+        $declaredType = $doctypeIDUnbekannt ?: '01'; // ID für Unbekannt -> Achtung: 01 ist irgendwas anderes
     } else {
         $typeName = $pl->getDocumentTypeName($declaredType);
     }
@@ -259,91 +261,14 @@ function process_one(
 
     //  ============================ ausklammern der weiteren Verarbeitung ================================
     //  sofern es keine Rechnung ist -> keine Prüfung auf den Status oder dergleichen
+    //  Logikänderung hier: die Prüfung auf gültige Dokumententypen wird nun entfernt. Sollte es wirklich
+    //  einen unbekannten DokTyp geben, dann wird dieser hier der Art "Unbekannt" zugewiesen. Voraussetzung
+    //  ist natürlich, dass der DokTyp "Unbekannt" in Paperless existiert (siehe Coding am Beginn dieser Logik, wo 
+    //  der DokTyp "Unbekannt" ermittelt wird)
 
-    switch ($typeName) {
-
-        // diese Dokumenttype werden einer weitergehenden Verarbeitung unterzogen
-        case 'Rechnung':
-        case 'Sachspende':
-        case 'Ersatzbeleg':
-        case 'Barbeleg':
-        case 'Kontoauszug':
-        case 'LG_Abrechnung':
-        case 'LG_Lohnsteuer':
-        case 'LG_KK':
-        case 'Bescheid':
-        case 'Unbekannt':
-            break;
-
-        // keiner der vorgenannten Dokumententypen -> Workflow wird geschlossen
-        default:
-            $typeName = 'Unbekannt';
-            //Log::j('INFO', 'skip.not-relevant', ['doc' => $docId, 'type' => $typeName]);
-            // ==> ============= hier braucht es noch eine Nachricht - ist defacto ein Fehler
-            if (!$opts['dry']) {
-                $tplBodyRaw = $repo->get_variable_value('WF:irrelevant') ?? '';
-                $tplBody    = $wf->normalize_template($tplBodyRaw); // <<< WICHTIG
-
-                $missing = [];
-
-                $vars = [
-                    'DOK_ID'       => $docId,
-                    'MISSING_LIST' => $wf->build_missing_list($missing),
-                    'NOTIZ'        => $notiz,
-                    'URL'          => $href,                                  // für href und sichtbaren Text nutzbar
-                    'URL_TEXT'     => htmlspecialchars($href, ENT_NOQUOTES),  // falls du {{URL_TEXT}} im sichtbaren Teil nutzen willst
-                ];
-                $body = trim($tplBody) !== '' ? $wf->render_template($tplBody, $vars)
-                    : "<p>unbekannter Dokumententyp " . $typeName . " - keine Workflow-Bearbeitung<a href=\"{$href}\">öffnen</a></p>";
-                $subject = "unbekannter Dokumententyp - keine Workflow-Bearbeitung: Dok #{$docId}";
-                $ntf->send(
-                    $repo->get_variable_value('WF_DEFAULT_ACTOR') ?: 'it_admin@albatros-hospiz.de',
-                    $subject,
-                    $body
-                );
-                // dieser Fall muss hier nun abgeschlossen werden -> es wird kein dms_extract bzw.
-                // wf_job geschrieben werden
-                $nextState = 'CLOSE';
-                $targetKey = $nextState; // z.B. 'APP_REQ' oder 'UNVOLL' …
-                $targetId  = (int)($T[$targetKey] ?? 0);
-
-                // build wfhistory entry
-                $repo->logWfHistory($docId, $currentState, $nextState, '-intern-');
-
-                $finalTagIds = $wf->buildFinalTags($currentTagIds, $stateIds, $targetId);
-                // wir schreiben keinen neuen Titel
-                $newTitle = '';
-                // es gibt auch keine Benutzerfeld-Patches
-                $cfPatches = null;
-                // nur die TagID setzen
-                $code = 0;
-                $body = '';
-                Log::j('DEBUG', 'AtomicPatchBeforeCall', ['Title' => $newTitle, 'Tags' => $finalTagIds, 'Patches' => $cfPatches]);
-                $ok = $pl->patchDocumentAtomic(
-                    $docId,
-                    $newTitle,        // null, wenn du den Titel nicht ändern willst
-                    $finalTagIds,      // null, wenn Tags unverändert bleiben sollen
-                    $cfPatches,        // null, wenn keine CF-Updates anstehen
-                    $code,
-                    $body
-                );
-                if (!$ok) {
-                    Log::j('DEBUG', 'AtomicPatch', ['ok' => $ok, 'Title' => $newTitle, 'Tags' => $finalTagIds, 'Patches' => $cfPatches]);
-                }
-                $repo->wfSetState($docId, $nextState, $newTitle, $typeName);
-                Log::j('INFO', 'process_one.done', ['doc' => $docId ?? '0', 'exit_stop' => "keine Rechnung"]);
-                return;
-            }
-    }
-
-    // =====================================================================================
-    // ab hier haben wir es nur mit relevanten Dokumententypen zu tun. Die weitere
-    // Bearbeitung wird durch den Status entschieden. Bezogen auf den Status gibt 
-    // es aber wiederum Unterschiede durch den Dokumententypen, da diverse Stati 
-    // z.B. nur für eine Rechnung relevant sind
-    // =====================================================================================
 
     //abhängig vom aktuellen Status müssen die unterschiedlichen Aktionen ausgeführt werden
+
     switch ($currentState) {
 
         // =============================================================================================
@@ -355,7 +280,8 @@ function process_one(
 
         case "PRUEFEN":
         case "INIT":
-            if ($wfjob_exists !== null && $currentState === 'INIT') {   // so wird INIT-Verarbeitung nur einmal Initial ausgeführt
+            Log::j('DEBUG', 'Enter into PRUEFEN/INIT', ['doctypename' => $typeName, 'currentState' => $currentState, 'wfjob_exists' => $wfjob_exists]);
+            if ($wfjob_exists === 'INIT' && $currentState === 'INIT') {   // so wird INIT-Verarbeitung nur einmal Initial ausgeführt
                 break;
             }
             Log::j('DEBUG', 'Enter into PRUEFEN/INIT', ['doctypename' => $typeName]);
@@ -426,6 +352,9 @@ function process_one(
                     $code,
                     $body
                 );
+                if ($newTitle === null) {
+                    $newTitle = '';
+                }
                 $repo->wfSetState($docId, $nextState, $newTitle, $typeName);
                 $repo->upsertExtract($docId, $ex, $exKI);
                 break;
@@ -473,13 +402,21 @@ function process_one(
 
             if ($currentState === "INIT") {
 
+                if ($typeName === 'Unbekannt') {
+                    $mailref = 'WF:neues_dokument_typ_unbekannt';
+                    $mailTitle = 'neues Dokument (Typ unbekannt) - bitte pruefen';
+                } else {
+                    $mailref = 'WF:neues_dokument';
+                    $mailTitle = 'Neues Dokument - bitte pruefen';
+                }
+
                 if ($wfjob_exists === null) {
                     $wf->common_send(
                         $docId,
                         $doc,
-                        'WF:neues_dokument',
+                        $mailref,
                         'WF_DEFAULT_ACTOR',
-                        'Neues Dokument - bitte pruefen',
+                        $mailTitle,
                         $missing,
                         $overrides,
                         $href,
@@ -525,42 +462,42 @@ function process_one(
                 } else {
                     // vollständig: je nach Zahlart weiter
                     $nextState = !empty($ex['direct_debit']) ? 'CLOSE' : 'APP_REQ';
-                    if (!$opts['dry']) {
-                        if ($nextState === 'APP_REQ') {
-                            Log::j('DEBUG', 'going to send invoice approval request', ['doc' => $docId]);
-                            $wf->common_send(
-                                $docId,
-                                $doc,
-                                'WF:rechnungsfreigabe_erforderlich',
-                                'WF_DEFAULT_APPROVER',
-                                'Rechnungsfreigabe erforderlich',
-                                $missing,
-                                $overrides,
-                                $href,
-                                $wf,
-                                $repo,
-                                $ntf
-                            );
-                        } else {
-                            // es handelt sich um Rechnung mit Einzug (dd -> direct debit -> Einzug)
-                            // Nachricht an den ACTOR, dass weitere Verarbeitung für dieses Dokument
-                            // nun geschlossen ist
+                    //if (!$opts['dry']) {
+                    if ($nextState === 'APP_REQ') {
+                        Log::j('DEBUG', 'going to send invoice approval request', ['doc' => $docId]);
+                        $wf->common_send(
+                            $docId,
+                            $doc,
+                            'WF:rechnungsfreigabe_erforderlich',
+                            'WF_DEFAULT_APPROVER',
+                            'Rechnungsfreigabe erforderlich',
+                            $missing,
+                            $overrides,
+                            $href,
+                            $wf,
+                            $repo,
+                            $ntf
+                        );
+                    } else {
+                        // es handelt sich um Rechnung mit Einzug (dd -> direct debit -> Einzug)
+                        // Nachricht an den ACTOR, dass weitere Verarbeitung für dieses Dokument
+                        // nun geschlossen ist
 
-                            $wf->common_send(
-                                $docId,
-                                $doc,
-                                'WF:dokument_geschlossen',
-                                'WF_DEFAULT_ACTOR',
-                                'Interne Verarbeitung abgeschlossen',
-                                $missing,
-                                $overrides,
-                                $href,
-                                $wf,
-                                $repo,
-                                $ntf
-                            );
-                        }
+                        $wf->common_send(
+                            $docId,
+                            $doc,
+                            'WF:dokument_geschlossen',
+                            'WF_DEFAULT_ACTOR',
+                            'Interne Verarbeitung abgeschlossen',
+                            $missing,
+                            $overrides,
+                            $href,
+                            $wf,
+                            $repo,
+                            $ntf
+                        );
                     }
+                    //}
                 }
             }
 
@@ -689,7 +626,9 @@ function process_one(
             if (!$ok) {
                 Log::j('DEBUG', 'AtomicPatch', ['ok' => $ok, 'Title' => $newTitle, 'Tags' => $finalTagIds, 'Patches' => $cfPatches]);
             }
-            $repo->wfSetState($docId, $nextState, '', $typeName);
+            // nicht den Status schreiben, denn sonst würde der Workflow kein "neues" Dokument signalisieren
+            // das ist aber bei REACT gewünscht, damit der Benutzer das Dokument erneut prüfen und ggf. ändern kann
+            //$repo->wfSetState($docId, $nextState, '', $typeName);
             break;
 
         // =============================================================================================

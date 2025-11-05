@@ -322,7 +322,7 @@ final class Service
         $final = array_values(array_unique(array_merge($keptNonState, [(int)$T[$chosen]])));
 
         // 10) State persistieren + Logging
-        $this->repo->wfSetState($docId, $chosen, $title, $document_type);
+        //$this->repo->wfSetState($docId, $chosen, $title, $document_type);
         \App\Log::j('DEBUG', 'wf.state.enforced', [
             'doc' => $docId,
             'prev' => $prev,
@@ -420,12 +420,15 @@ final class Service
         // Alle State-Tag-IDs (die exklusiv sein sollen)
         $stateIds = array_values(array_filter([
             $T['PRUEFEN'] ?? null,
+            $T['PRUEFEN2'] ?? null,
+            $T['REACT'] ?? null,
             $T['UNVOLL'] ?? null,
             $T['APP_REQ'] ?? null,
             $T['APP_OK'] ?? null,
             $T['SEPA']   ?? null,
             $T['CLOSE']   ?? null,
             $T['ERROR'] ?? null,
+            $T['INIT'] ?? null,
         ], fn($v) => !is_null($v)));
 
         // Aktuelle Tags (IDs) holen – sowohl tags als auch tags_data abdecken
@@ -790,9 +793,19 @@ final class Service
         return $isAssoc ? array_keys($missing) : array_values($missing);
     }
 
-    function build_missing_list_html($missing, array $labels): string
+    function build_missing_list_html($missing): string
     {
         $items = self::normalize_missing_items($missing);
+        $labels = [
+            'issuer_name' => 'Rechnungssteller',
+            'invoice_number' => 'Rechnungsnummer',
+            'invoice_date' => 'Rechnungsdatum',
+            'invoice_amount' => 'Betrag',
+            'issuer_iban' => 'IBAN',
+            'issuer_bic' => 'BIC',
+            'payment_purpose' => 'Verwendungszweck',
+            'direct_debit' => 'Zahlart',
+        ];
         if (!$items) return '<em>—</em>';
         $html = '<ul>';
         foreach ($items as $k) {
@@ -907,8 +920,8 @@ final class Service
             'invoice_number' => 'Rechnungsnummer',
             'invoice_date' => 'Rechnungsdatum',
             'invoice_amount' => 'Betrag',
-            'issuer_iban' => 'IBAN',
-            'issuer_bic' => 'BIC',
+            'issuer_iban' => 'IBAN des Rechnungsstellers',
+            'issuer_bic' => 'BIC des Rechnungsstellers',
             'payment_purpose' => 'Verwendungszweck',
             'direct_debit' => 'Zahlart',
         ];
@@ -937,7 +950,7 @@ final class Service
 
         $vars = [
             'DOK_ID'       => $docId,
-            'MISSING_LIST' => $wf->build_missing_list($missing),
+            'MISSING_LIST' => $wf->build_missing_list_html($missing),
             'NOTIZ'        => $notiz,
             'URL'          => $href,                                  // für href und sichtbaren Text nutzbar
             'URL_TEXT'     => htmlspecialchars($href, ENT_NOQUOTES),  // falls du {{URL_TEXT}} im sichtbaren Teil nutzen willst
