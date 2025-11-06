@@ -318,23 +318,55 @@ function process_one(
                     }
                     $cfPatches[] = ['field' => (int)$fid, 'value' => $val];
                 }
-                if ($typeName === 'Barbeleg') {
-                    $newTitle = ('Kassenbuch: ' . $ex['invoice_number']) ?? 'Barbeleg ' . ' ' . ($ex['payment_purpose'] ?? '');
-                    preg_match('/^(\d+):(\d+)$/', $ex['invoice_number'] ?? '', $m);
-                    if (count($m) === 3) {
-                        $dkbid = (int)$m[1];
-                        $lfdnr = (int)$m[2];
-                        $ref = $repo->find_dkbd_entry($dkbid, $lfdnr);
-                        if ($ref !== null) {
-                            $repo->link_dok_to_dkbd($docId, $dkbid, $lfdnr);
-                            Log::j('INFO', 'Barbeleg linked', ['doc' => $docId, 'dkbid' => $dkbid, 'lfdnr' => $lfdnr, 'dmsdokid' => $ref]);
+
+                switch ($typeName) {
+                    case 'Ersatzbeleg':
+                        $newTitle = $ex['invoice_number'] ?? 'Ersatzbeleg';
+                        break;
+                    case 'Barbeleg':
+                        $newTitle = ('Kassenbuch: ' . $ex['invoice_number']) ?? 'Barbeleg ' . ' ' . ($ex['payment_purpose'] ?? '');
+                        preg_match('/^(\d+):(\d+)$/', $ex['invoice_number'] ?? '', $m);
+                        if (count($m) === 3) {
+                            $dkbid = (int)$m[1];
+                            $lfdnr = (int)$m[2];
+                            $ref = $repo->find_dkbd_entry($dkbid, $lfdnr);
+                            if ($ref !== null) {
+                                $repo->link_dok_to_dkbd($docId, $dkbid, $lfdnr);
+                                Log::j('INFO', 'Barbeleg linked', ['doc' => $docId, 'dkbid' => $dkbid, 'lfdnr' => $lfdnr, 'dmsdokid' => $ref]);
+                            } else {
+                                Log::j('WARN', 'Barbeleg link failed - reference not found', ['doc' => $docId, 'dkbid' => $dkbid, 'lfdnr' => $lfdnr]);
+                            }
                         } else {
-                            Log::j('WARN', 'Barbeleg link failed - reference not found', ['doc' => $docId, 'dkbid' => $dkbid, 'lfdnr' => $lfdnr]);
+                            Log::j('WARN', 'Barbeleg link failed - invalid reference', ['doc' => $docId, 'referenz' => $ex['invoice_number'] ?? '']);
                         }
-                    } else {
-                        Log::j('WARN', 'Barbeleg link failed - invalid reference', ['doc' => $docId, 'referenz' => $ex['invoice_number'] ?? '']);
-                    }
+                        break;
+                    case 'Sachspende':
+                        $newTitle = 'Sachspende: ' . ($ex['issuer_name'] ?? '') . ' ' . ($ex['invoice_number'] ?? '');
+                        $kontoauszug = $repo->createAutoBookingPseudoStatement($docId, $ex);
+                        $missing = [];
+                        $overrides = [];
+                        $mailsubject = 'Sachspende - Kontoauszug mit ID = ' . $kontoauszug . ' erstellt';
+                        $wf->common_send(
+                            $docId,
+                            $doc,
+                            'WF:Kontoauszug_erstellt',
+                            'WF_DEFAULT_ACTOR',
+                            $mailsubject,
+                            $missing,
+                            $overrides,
+                            $href,
+                            $wf,
+                            $repo,
+                            $ntf
+                        );
+                        break;
+                    default:
+                        $issuer = $ex['issuer_name'];
+                        $invDate = $ex['invoice_date'];
+                        $newTitle = $wf->buildTitle($typeName, $issuer, $exCF, $invDate);
+                        break;
                 }
+                
                 // build wfhistory entry
                 $repo->logWfHistory($docId, $currentState, $nextState, '-intern-');
 
