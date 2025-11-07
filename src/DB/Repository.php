@@ -311,7 +311,7 @@ final class Repository
     public function deleteWfJob($docId): void
     {
         try {
-            $stmt = $this->pdo->prepare("DELETE FROM wf_jobs WHERE dms_document_id = ?");
+            $stmt = $this->pdo->prepare("DELETE FROM wf_jobs WHERE document_id = ?");
             $stmt->bindValue(1, $docId, PDO::PARAM_INT);
             $stmt->execute();
         } catch (\PDOException $e) {

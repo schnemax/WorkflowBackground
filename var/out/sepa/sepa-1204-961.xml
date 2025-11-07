@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Document xmlns="urn:iso:std:iso:20022:tech:xsd/pain.001.001.03">
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.03" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:iso:std:iso:20022:tech:xsd:pain.001.001.03 pain.001.001.03.xsd">
   <CstmrCdtTrfInitn>
     <GrpHdr>
-      <MsgId>MSG-961-4bca1051</MsgId>
-      <CreDtTm>2025-10-26T07:43:35Z</CreDtTm>
+      <MsgId>MSG-961-44d2a4ca</MsgId>
+      <CreDtTm>2025-11-07T12:58:59Z</CreDtTm>
       <NbOfTxs>1</NbOfTxs>
       <CtrlSum>127.38</CtrlSum>
       <InitgPty>
@@ -21,7 +21,7 @@
           <Cd>SEPA</Cd>
         </SvcLvl>
       </PmtTpInf>
-      <ReqdExctnDt>2025-10-26</ReqdExctnDt>
+      <ReqdExctnDt>2025-11-07</ReqdExctnDt>
       <Dbtr>
         <Nm>Hospiz-Gruppe Albatros</Nm>
       </Dbtr>
@@ -30,6 +30,13 @@
           <IBAN>DE47370205000007872000</IBAN>
         </Id>
       </DbtrAcct>
+      <DbtrAgt>
+        <FinInstnId>
+          <Othr>
+            <Id>NOTPROVIDED</Id>
+          </Othr>
+        </FinInstnId>
+      </DbtrAgt>
       <ChrgBr>SLEV</ChrgBr>
       <CdtTrfTxInf>
         <PmtId>
@@ -38,11 +45,6 @@
         <Amt>
           <InstdAmt Ccy="EUR">127.38</InstdAmt>
         </Amt>
-        <CdtrAgt>
-          <FinInstnId>
-            <BICFI>AUGSDE77XXX</BICFI>
-          </FinInstnId>
-        </CdtrAgt>
         <Cdtr>
           <Nm>Rieger und Ludwig GmbH</Nm>
         </Cdtr>
