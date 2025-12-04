@@ -672,9 +672,10 @@ final class Client
         ?string $title,
         ?array $tagIds,
         ?array $customFields, // Liste von ['field'=>int, 'value'=>scalar]
-        ?int &$code = null,
-        ?string &$body = null,
-        ?int $doctype = null
+        ?int &$code,
+        ?string &$body,
+        ?int $doctype = null,
+        ?string $notiz = null
     ): bool {
         $payload = [];
         if ($title !== null)  $payload['title'] = $title;
@@ -685,6 +686,12 @@ final class Client
                 return ['field' => (int)$x['field'], 'value' => $x['value'] ?? null];
             }, $customFields));
         }
+        //Notizen können leider so nicht gesetzt werden. Da wird ein spezieller API-Call benötigt.
+        //$client->patch("/api/documents/{$docId}/notes/{$noteId}/", [
+        //    'json' => ['note' => $neuerText]
+        //]);
+        //wir lassen jetzt erstmal die Notizen nur in Table wf_jobs
+        //if ($notiz !== null) $payload['notes'] = $notiz;
         if ($doctype !== null) $payload['document_type'] = $doctype;
         $url = rtrim($this->baseUrl, '/') . "/api/documents/{$docId}/"; // <-- trailing slash
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE);

@@ -471,18 +471,6 @@ final class Service
         $file = $this->sepa->generate_sepa_pain001($ex, $docId, $repo);
         if (!$file) return false;
 
-        // optional: Mail-Hinweis
-        if ($this->notifier && empty($opts['dry'])) {
-            $to = getenv('WF_DEFAULT_SEPA_ACTOR') ?: 'it_admin@albatros-hospiz.de';
-            $this->notifier->send(
-                $to,
-                "SEPA erstellt: Dok #$docId",
-                '<p>SEPA-Datei erstellt.</p>
-                <p>Holen Sie die SEPA-Datei an dem Ihnen bekanntgemachten Ordner ab und reichen diesen bei der Bank ein</p>
-                <p>Hier k&ouml;nnen Sie das zugrundeliegende Dokument (nicht die SEPA-Datei) nochmals einsehen
-                <a href="' . $this->pl->documentUrl($docId) . '">Dokument &ouml;ffnen</a></p>'
-            );
-        }
         return true;
     }
 

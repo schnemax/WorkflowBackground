@@ -62,6 +62,17 @@ final class ApiController
     {
         $status = (string)($body['status'] ?? '');
         $usr    = (array)  ($body['user_fields'] ?? []);
+        $title = (string)($body['title'] ?? null);
+        $notiz = (string)($body['notes'] ?? null);
+
+        // ❷ Mapping: Doctype-Label -> Doctype-ID (Paperless)
+        $doctypeId = null;
+        if (!empty($body['document_type'])) {
+            $doctypeId = $this->paperless->findTagIdByName((string)$body['document_type']) // z.B. "Rechnung" → 7
+                ??  $this->doctypes->resolveIdBySlug((string)$body['document_type'])   // fallback
+                ?? null;
+        }
+
         \App\Log::j('INFO', 'commit', ['map' => $body]);
         if ($status === '') return ['ok' => false, 'error' => 'status missing'];
 
@@ -93,16 +104,16 @@ final class ApiController
         $patches = $wf->syncCustomFieldsAndValidate($docId, $usr, $status, $pl);
         $cfPatches = [];
         foreach ($patches /* dein Dict */ as $fid => $val) {
-            // Typ-Sauberkeit:
-            if ((int)$fid === 15) { // falls 15 = Betrag (decimal)
-                $val = number_format((float)$val, 2, '.', ''); // "7676.00"
-            }
+            // Typ-Sauberkeit: --> läuft auch ohne die nachfolgende Prüfung. Aber hart-codiert geht überhaupt nicht.
+            //if ((int)$fid === 15) { // falls 15 = Betrag (decimal)
+            //    $val = number_format((float)$val, 2, '.', ''); // "7676.00"
+            //}
             $cfPatches[] = ['field' => (int)$fid, 'value' => $val];
         }
 
         $code = 0;
         $body = '';
-        $title = null;
+
         //Log::j('DEBUG', 'AtomicPatchBeforeCall', ['Title' => $newTitle, 'Tags' => $finalTagIds, 'Patches' => $cfPatches]);
         $ok = $pl->patchDocumentAtomic(
             $docId,
@@ -110,7 +121,9 @@ final class ApiController
             $tagId,      // null, wenn Tags unverändert bleiben sollen
             $cfPatches,        // null, wenn keine CF-Updates anstehen
             $code,
-            $body
+            $body,
+            $doctypeId,    // null, wenn Doctype unverändert bleiben soll
+            $notiz
         );
         if ($ok === true) {
             return ['ok' => true, 'Status' => 'paperless patched'];
